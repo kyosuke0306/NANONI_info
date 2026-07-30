@@ -11,20 +11,39 @@
 
   var SESSION_KEY = 'nanoni.unlocked.v1';
 
-  // 3つのページで同じ payload.js を使い、復号後に必要な部分だけを残す。
+  // 5つのページで同じ payload.js を使い、復号後に必要な部分だけを残す。
   // （本文を二重に持たないため）
-  //   full     … 通常版。スケジュールの章だけ外す
+  //   full     … 通常版。専用ページの章を外す
   //   simple   … 簡易版。図だけを残す
   //   schedule … スケジュール。その章だけを残し、進捗の記録UIを足す
-  var MODES = { full: 1, simple: 1, schedule: 1 };
+  //   lot2     … 第2ロット。その章だけを残し、入力・計算UIを足す
+  //   chat     … AIに質問。その章だけを残し、チャットUIを足す
+  var MODES = { full: 1, simple: 1, schedule: 1, lot2: 1, chat: 1 };
   var MODE = MODES[document.documentElement.dataset.mode] ? document.documentElement.dataset.mode : 'full';
 
+  // 自分の章だけを表示する専用ページ（data-page の値と一致させる）
+  var SOLO_PAGES = { schedule: 1, lot2: 1, chat: 1 };
+
   var PROGRESS_KEY = 'nanoni.progress.v1';
+  var LOT2_KEY     = 'nanoni.lot2.v1';
+  var APIKEY_KEY   = 'nanoni.apikey.v1';
+
   var STATUSES = [
     { id: 'todo',  label: '未着手' },
     { id: 'doing', label: '進行中' },
     { id: 'done',  label: '完了' }
   ];
+
+  // 費用の単位。lot2 ページの計算はすべてここを見る
+  var UNITS = [
+    { id: 'can',  label: '1缶ごと' },
+    { id: 'case', label: '1ケースごと' },
+    { id: 'shop', label: '1店舗ごと' },
+    { id: 'lot',  label: '一式' }
+  ];
+
+  // 復号した本文をテキストにしたもの（chat ページの前提知識）
+  var CONTEXT_TEXT = '';
 
   var gate     = document.getElementById('gate');
   var gateForm = document.getElementById('gate-form');
@@ -112,9 +131,13 @@
 
   function render(html) {
     docEl.innerHTML = html;
+    // 章を捨てる前に、本文ぜんぶをテキストにしておく（AIに渡す前提知識）
+    if (MODE === 'chat') CONTEXT_TEXT = htmlToText(html);
     routePages();
-    if (MODE === 'simple') simplify();
+    if (MODE === 'simple')   simplify();
     if (MODE === 'schedule') initProgress();
+    if (MODE === 'lot2')     initLot2();
+    if (MODE === 'chat')     initChat();
     stampBuildDate();
     wrapWideTables();
     buildToc();
@@ -126,28 +149,34 @@
 
   /* ------------------------------------------------- ページの振り分け */
 
-  // data-page="schedule" が付いた章はスケジュールページ専用。
+  // data-page="…" が付いた章は、その名前の専用ページにだけ出す。
   function routePages() {
-    if (MODE === 'schedule') {
-      docEl.querySelectorAll('section:not([data-page="schedule"])').forEach(function (s) { s.remove(); });
+    if (SOLO_PAGES[MODE]) {
+      docEl.querySelectorAll('section:not([data-page="' + MODE + '"])').forEach(function (s) { s.remove(); });
       var lede = docEl.querySelector('.lede');
       if (lede) lede.remove();
     } else {
-      docEl.querySelectorAll('[data-page="schedule"]').forEach(function (s) { s.remove(); });
+      docEl.querySelectorAll('section[data-page]').forEach(function (s) { s.remove(); });
     }
   }
 
   /* ------------------------------------------------------- 進捗の記録 */
 
-  function loadProgress() {
-    try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {}; }
-    catch (e) { return {}; }
+  // 記録はどのページも同じ形で扱う（localStorage に JSON で1件）
+  function readStore(key, fallback) {
+    try {
+      var v = JSON.parse(localStorage.getItem(key));
+      return (v && typeof v === 'object') ? v : fallback;
+    } catch (e) { return fallback; }
   }
 
-  function saveProgress(data) {
-    try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(data)); return true; }
+  function writeStore(key, data) {
+    try { localStorage.setItem(key, JSON.stringify(data)); return true; }
     catch (e) { return false; }
   }
+
+  function loadProgress() { return readStore(PROGRESS_KEY, {}); }
+  function saveProgress(data) { return writeStore(PROGRESS_KEY, data); }
 
   function today() {
     var d = new Date();
@@ -178,20 +207,15 @@
       '</div>' +
       '<table class="tbl prog-table"><thead><tr>' +
         '<th>作業</th><th style="width:44%">状態</th><th style="width:16%">更新日</th>' +
-      '</tr></thead><tbody data-prog-body></tbody></table>' +
-      '<details class="prog-io"><summary>記録の書き出し / 読み込み</summary>' +
-        '<p class="prog-io-note">下の文字列をコピーして渡すと、相手の画面でも同じ進捗になります。' +
-        '受け取った文字列を貼り付けて「読み込む」を押してください。</p>' +
-        '<textarea data-io rows="3" spellcheck="false"></textarea>' +
-        '<div class="prog-io-btns">' +
-          '<button type="button" data-copy>コピーする</button>' +
-          '<button type="button" data-load>読み込む</button>' +
-          '<button type="button" data-reset>すべて未着手に戻す</button>' +
-        '</div>' +
-        '<p class="prog-io-msg" data-io-msg role="status" aria-live="polite"></p>' +
-      '</details>';
+      '</tr></thead><tbody data-prog-body></tbody></table>';
 
     docEl.querySelector('#schedule').appendChild(panel);
+
+    var io = ioPanel(function () { return state; },
+                     function (next) { state = next; saveProgress(state); paint(); },
+                     function () { return {}; });
+    io.querySelector('[data-reset]').textContent = 'すべて未着手に戻す';
+    panel.appendChild(io);
 
     var tbody = panel.querySelector('[data-prog-body]');
 
@@ -236,7 +260,7 @@
       panel.querySelector('[data-done]').textContent = done;
       panel.querySelector('[data-total]').textContent = rows.length;
       panel.querySelector('[data-meter]').style.width = (done / rows.length * 100) + '%';
-      panel.querySelector('[data-io]').value = JSON.stringify(state);
+      io.sync();
     }
 
     tbody.addEventListener('click', function (e) {
@@ -246,42 +270,815 @@
       var st = btn.dataset.set;
       if (st === 'todo') delete state[id];
       else state[id] = { status: st, at: today() };
-      if (!saveProgress(state)) msg('保存できませんでした（ブラウザの設定を確認してください）');
-      paint();
-    });
-
-    var ioMsg = panel.querySelector('[data-io-msg]');
-    function msg(t) { ioMsg.textContent = t; setTimeout(function () { ioMsg.textContent = ''; }, 4000); }
-
-    panel.querySelector('[data-copy]').addEventListener('click', function () {
-      var ta = panel.querySelector('[data-io]');
-      ta.select();
-      navigator.clipboard ? navigator.clipboard.writeText(ta.value).then(function () { msg('コピーしました'); },
-                                                                        function () { msg('コピーできませんでした。手動で選択してください'); })
-                          : msg('手動で選択してコピーしてください');
-    });
-
-    panel.querySelector('[data-load]').addEventListener('click', function () {
-      var raw = panel.querySelector('[data-io]').value.trim();
-      if (!raw) { msg('貼り付けてから押してください'); return; }
-      var parsed;
-      try { parsed = JSON.parse(raw); } catch (e) { msg('読み込めませんでした（形式が違います）'); return; }
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { msg('読み込めませんでした（形式が違います）'); return; }
-      state = parsed;
       saveProgress(state);
       paint();
-      msg('読み込みました');
-    });
-
-    panel.querySelector('[data-reset]').addEventListener('click', function () {
-      if (!confirm('記録をすべて未着手に戻します。よろしいですか？')) return;
-      state = {};
-      saveProgress(state);
-      paint();
-      msg('未着手に戻しました');
     });
 
     paint();
+  }
+
+  /* ----------------------------------------------------- 小さな道具 */
+
+  function num(v) {
+    var n = parseFloat(String(v == null ? '' : v).replace(/[,\s円本缶店]/g, ''));
+    return isFinite(n) ? n : 0;
+  }
+
+  function fmt(n, digits) {
+    if (!isFinite(n)) return '—';
+    return n.toLocaleString('ja-JP', { maximumFractionDigits: digits == null ? 0 : digits });
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  // 「書き出し / 読み込み」のパネル。進捗も第2ロットも同じ形で共有する。
+  function ioPanel(getState, setState, blankState) {
+    var box = document.createElement('details');
+    box.className = 'prog-io';
+    box.innerHTML =
+      '<summary>記録の書き出し / 読み込み</summary>' +
+      '<p class="prog-io-note">下の文字列をコピーして渡すと、相手の画面でも同じ内容になります。' +
+      '受け取った文字列を貼り付けて「読み込む」を押してください。</p>' +
+      '<textarea data-io rows="3" spellcheck="false"></textarea>' +
+      '<div class="prog-io-btns">' +
+        '<button type="button" data-copy>コピーする</button>' +
+        '<button type="button" data-load>読み込む</button>' +
+        '<button type="button" data-reset>すべて消す</button>' +
+      '</div>' +
+      '<p class="prog-io-msg" data-io-msg role="status" aria-live="polite"></p>';
+
+    var ta = box.querySelector('[data-io]');
+    var out = box.querySelector('[data-io-msg]');
+
+    function msg(t) { out.textContent = t; setTimeout(function () { out.textContent = ''; }, 4000); }
+
+    box.querySelector('[data-copy]').addEventListener('click', function () {
+      ta.select();
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(ta.value).then(
+          function () { msg('コピーしました'); },
+          function () { msg('コピーできませんでした。手動で選択してください'); });
+      } else { msg('手動で選択してコピーしてください'); }
+    });
+
+    box.querySelector('[data-load]').addEventListener('click', function () {
+      var raw = ta.value.trim();
+      if (!raw) { msg('貼り付けてから押してください'); return; }
+      var parsed;
+      try { parsed = JSON.parse(raw); } catch (e) { msg('読み込めませんでした（形式が違います）'); return; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        msg('読み込めませんでした（形式が違います）'); return;
+      }
+      setState(parsed);
+      msg('読み込みました');
+    });
+
+    box.querySelector('[data-reset]').addEventListener('click', function () {
+      if (!confirm('入力した内容をすべて消します。よろしいですか？')) return;
+      setState(blankState());
+      msg('消しました');
+    });
+
+    box.sync = function () { ta.value = JSON.stringify(getState()); };
+    return box;
+  }
+
+  /* --------------------------------------------------------- 第2ロット */
+
+  // 数字は app.js に書かない。第1ロットの実績は本文側の data-lot2-preset から読む。
+  function readPreset() {
+    var el = docEl.querySelector('[data-lot2-preset]');
+    if (!el) return null;
+    return {
+      base: {
+        cans:    el.dataset.cans    || '',
+        perCase: el.dataset.perCase || '',
+        shops:   el.dataset.shops   || '',
+        price:   el.dataset.price   || ''
+      },
+      costs: Array.prototype.map.call(el.querySelectorAll('[data-item]'), function (s) {
+        return { item: s.dataset.item, unit: s.dataset.unit, amount: s.dataset.amount };
+      })
+    };
+  }
+
+  function initLot2() {
+    var sec = docEl.querySelector('#lot2');
+    var preset = readPreset();
+    if (!sec || !preset) return;
+
+    function blank() {
+      return {
+        base: { cans: '', perCase: '', shops: '', price: '' },
+        costs: preset.costs.map(function (c) { return { item: c.item, unit: c.unit, amount: '' }; }),
+        stock: []
+      };
+    }
+
+    var state = readStore(LOT2_KEY, null);
+    if (!state || !Array.isArray(state.costs)) state = blank();
+    if (!state.base) state.base = blank().base;
+    if (!Array.isArray(state.stock)) state.stock = [];
+
+    var wrap = document.createElement('div');
+    wrap.className = 'lot2';
+    wrap.innerHTML =
+      '<h3 id="lot2-base">1. 基本の数字</h3>' +
+      '<div class="l2-fields">' +
+        field('cans',    '作る本数',   '缶', '例）200',    '1') +
+        field('perCase', '1ケースの本数', '缶', '例）20',   '1') +
+        field('shops',   '卸すお店の数', '店', '例）4',     '1') +
+        field('price',   'お店に売る値段<span class="gloss">（税抜・1缶）</span>', '円', '例）909.09', '0.01') +
+      '</div>' +
+
+      '<h3 id="lot2-cost">2. かかるお金</h3>' +
+      '<table class="tbl l2-costs"><thead><tr>' +
+        '<th style="width:28%">項目</th><th style="width:20%">単位</th><th style="width:18%">単価（円）</th>' +
+        '<th style="width:17%">合計</th><th style="width:15%">1缶あたり</th><th style="width:1%"><span class="visually-hidden">消す</span></th>' +
+      '</tr></thead><tbody data-cost-body></tbody>' +
+      '<tfoot><tr class="tr-total"><td>合計</td><td></td><td></td>' +
+        '<td class="num" data-cost-total>—</td><td class="num" data-cost-percan>—</td><td></td></tr></tfoot></table>' +
+      '<div class="l2-actions">' +
+        '<button type="button" data-add-cost>項目を足す</button>' +
+        '<button type="button" data-fill>第1ロットの数字を入れる</button>' +
+      '</div>' +
+
+      '<figure class="viz"><p class="viz-title">何にいくらかかるか</p><div data-cost-chart></div>' +
+        '<p class="viz-note">ケースの数は <strong>作る本数 ÷ 1ケースの本数</strong> を切り上げて計算しています。</p></figure>' +
+
+      '<h3 id="lot2-unit">3. 1缶あたりの計算</h3>' +
+      '<div class="kpi-grid" data-kpi></div>' +
+      '<figure class="viz"><p class="viz-title">売る値段と、かかるお金</p><div data-unit-chart></div></figure>' +
+
+      '<h3 id="lot2-stock">4. 在庫の行き先</h3>' +
+      '<table class="tbl l2-stock"><thead><tr>' +
+        '<th style="width:44%">出荷先</th><th style="width:26%">種別</th><th style="width:22%">本数</th>' +
+        '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
+      '</tr></thead><tbody data-stock-body></tbody></table>' +
+      '<div class="l2-actions"><button type="button" data-add-stock>出荷先を足す</button></div>' +
+      '<figure class="viz"><p class="viz-title">在庫の残り</p><div data-stock-chart></div></figure>';
+
+    sec.appendChild(wrap);
+
+    var io = ioPanel(function () { return state; },
+                     function (next) { state = normalize(next); persist(); rebuild(); },
+                     blank);
+    sec.appendChild(io);
+
+    function field(key, label, unit, ph, step) {
+      return '<label class="l2-field"><span class="l2-field-label">' + label + '</span>' +
+             '<input type="number" inputmode="decimal" min="0" step="' + step + '" ' +
+             'data-base="' + key + '" placeholder="' + ph + '">' +
+             '<em>' + unit + '</em></label>';
+    }
+
+    function normalize(next) {
+      var b = blank();
+      if (!next || typeof next !== 'object') return b;
+      return {
+        base:  (next.base && typeof next.base === 'object') ? next.base : b.base,
+        costs: Array.isArray(next.costs) ? next.costs : b.costs,
+        stock: Array.isArray(next.stock) ? next.stock : []
+      };
+    }
+
+    function persist() {
+      if (!writeStore(LOT2_KEY, state)) {
+        wrap.querySelector('[data-kpi]').setAttribute('data-warn', '保存できませんでした');
+      }
+      io.sync();
+    }
+
+    /* ---- 計算 ---- */
+
+    function calc() {
+      var cans    = num(state.base.cans);
+      var perCase = num(state.base.perCase);
+      var shops   = num(state.base.shops);
+      var price   = num(state.base.price);
+      var cases   = perCase > 0 ? Math.ceil(cans / perCase) : 0;
+
+      var rows = state.costs.map(function (c) {
+        var a = num(c.amount), total;
+        if (c.unit === 'can')       total = a * cans;
+        else if (c.unit === 'case') total = a * cases;
+        else if (c.unit === 'shop') total = a * shops;
+        else                        total = a;
+        return { item: c.item, total: total, perCan: cans > 0 ? total / cans : 0 };
+      });
+
+      var total = rows.reduce(function (s, r) { return s + r.total; }, 0);
+      var perCan = cans > 0 ? total / cans : 0;
+
+      var paid = 0, free = 0;
+      state.stock.forEach(function (s) {
+        var q = num(s.qty);
+        if (s.kind === 'free') free += q; else paid += q;
+      });
+
+      return {
+        cans: cans, cases: cases, price: price,
+        rows: rows, total: total, perCan: perCan,
+        margin: price - perCan,
+        breakEven: price > 0 ? Math.ceil(total / price) : 0,
+        paid: paid, free: free, left: cans - paid - free
+      };
+    }
+
+    /* ---- 行の組み立て（入力中に作り直すとカーソルが飛ぶので、増減のときだけ） ---- */
+
+    function rebuild() {
+      var cb = wrap.querySelector('[data-cost-body]');
+      cb.innerHTML = state.costs.map(function (c, i) {
+        return '<tr data-i="' + i + '">' +
+          '<td><input type="text" data-c="item" value="' + esc(c.item) + '" placeholder="項目名"></td>' +
+          '<td><select data-c="unit">' + UNITS.map(function (u) {
+            return '<option value="' + u.id + '"' + (u.id === c.unit ? ' selected' : '') + '>' + u.label + '</option>';
+          }).join('') + '</select></td>' +
+          '<td><input type="number" inputmode="decimal" min="0" step="0.01" data-c="amount" ' +
+            'value="' + esc(c.amount) + '" placeholder="—"></td>' +
+          '<td class="num" data-c-total>—</td><td class="num" data-c-percan>—</td>' +
+          '<td><button type="button" class="l2-del" data-del-cost aria-label="この行を消す">×</button></td>' +
+        '</tr>';
+      }).join('');
+
+      var sb = wrap.querySelector('[data-stock-body]');
+      sb.innerHTML = state.stock.length
+        ? state.stock.map(function (s, i) {
+            return '<tr data-i="' + i + '">' +
+              '<td><input type="text" data-s="to" value="' + esc(s.to) + '" placeholder="お店の名前など"></td>' +
+              '<td><select data-s="kind">' +
+                '<option value="paid"' + (s.kind !== 'free' ? ' selected' : '') + '>売る（有償）</option>' +
+                '<option value="free"' + (s.kind === 'free' ? ' selected' : '') + '>渡す（無償）</option>' +
+              '</select></td>' +
+              '<td><input type="number" inputmode="numeric" min="0" step="1" data-s="qty" ' +
+                'value="' + esc(s.qty) + '" placeholder="—"></td>' +
+              '<td><button type="button" class="l2-del" data-del-stock aria-label="この行を消す">×</button></td>' +
+            '</tr>';
+          }).join('')
+        : '<tr class="l2-none"><td colspan="4">まだ1件もありません。「出荷先を足す」から入れてください。</td></tr>';
+
+      wrap.querySelectorAll('[data-base]').forEach(function (i) {
+        i.value = state.base[i.dataset.base] == null ? '' : state.base[i.dataset.base];
+      });
+
+      paint();
+    }
+
+    /* ---- 計算結果の描画 ---- */
+
+    function paint() {
+      var d = calc();
+
+      wrap.querySelectorAll('[data-cost-body] tr').forEach(function (tr, i) {
+        var r = d.rows[i];
+        if (!r) return;
+        tr.querySelector('[data-c-total]').textContent  = r.total ? fmt(r.total) + '円' : '—';
+        tr.querySelector('[data-c-percan]').textContent = r.perCan ? fmt(r.perCan, 1) + '円' : '—';
+      });
+      wrap.querySelector('[data-cost-total]').textContent  = d.total ? fmt(d.total) + '円' : '—';
+      wrap.querySelector('[data-cost-percan]').textContent = d.perCan ? fmt(d.perCan, 1) + '円' : '—';
+
+      paintKpi(d);
+      paintCostChart(d);
+      paintUnitChart(d);
+      paintStockChart(d);
+      io.sync();
+    }
+
+    function kpi(label, gloss, value, unit, foot) {
+      return '<div class="kpi">' +
+        '<p class="kpi-label">' + label + (gloss ? '<span class="gloss">' + gloss + '</span>' : '') + '</p>' +
+        '<p class="kpi-value">' + value + (unit ? '<span class="kpi-unit">' + unit + '</span>' : '') + '</p>' +
+        '<p class="kpi-foot">' + foot + '</p></div>';
+    }
+
+    function paintKpi(d) {
+      var sign = d.margin < 0 ? '▲' : '';
+      wrap.querySelector('[data-kpi]').innerHTML =
+        kpi('かかるお金の合計', '', d.total ? fmt(d.total) : '—', d.total ? '円' : '',
+            d.cans ? d.cans + '缶ぶん' : '本数を入れてください') +
+        kpi('1缶を作るのにかかるお金', '（原価）', d.perCan ? fmt(d.perCan, 1) : '—', d.perCan ? '円' : '',
+            d.price ? '売る値段の' + (d.price ? (d.perCan / d.price * 100).toFixed(0) : '—') + '%' : '値段を入れてください') +
+        kpi('1缶売って残るお金', '（粗利）',
+            (d.price && d.perCan) ? sign + fmt(Math.abs(d.margin), 1) : '—',
+            (d.price && d.perCan) ? '円' : '',
+            (d.price && d.perCan)
+              ? (d.margin < 0 ? '売るほど赤字になります' : '売る値段の' + (d.margin / d.price * 100).toFixed(0) + '%')
+              : '—') +
+        kpi('かかったお金を取り戻すのに必要な本数', '', d.breakEven ? fmt(d.breakEven) : '—',
+            d.breakEven ? '缶' : '',
+            (d.breakEven && d.cans)
+              ? (d.breakEven > d.cans ? '作る本数を超えています' : '作る本数の' + (d.breakEven / d.cans * 100).toFixed(0) + '%')
+              : '—');
+    }
+
+    function empty(host, text) {
+      host.innerHTML = '<p class="l2-empty">' + text + '</p>';
+    }
+
+    function paintCostChart(d) {
+      var host = wrap.querySelector('[data-cost-chart]');
+      var rows = d.rows.filter(function (r) { return r.total > 0; })
+                       .sort(function (a, b) { return b.total - a.total; });
+      if (!rows.length) { empty(host, '基本の数字と単価を入れると、ここに内訳が出ます。'); return; }
+
+      var max = rows[0].total;
+      host.innerHTML = '<div class="barchart">' + rows.map(function (r) {
+        var pct = (r.total / max * 100).toFixed(1);
+        var share = (r.total / d.total * 100).toFixed(1);
+        return '<div class="bar-row">' +
+          '<span class="bar-name">' + esc(r.item) + '</span>' +
+          '<span class="bar-track"><span class="bar-fill" style="width:' + pct + '%" ' +
+            'title="' + esc(r.item) + ' ' + fmt(r.total) + '円（' + share + '%）"></span></span>' +
+          '<span class="bar-val">' + fmt(r.total) + '円<small>' + share + '%</small></span>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    function paintUnitChart(d) {
+      var host = wrap.querySelector('[data-unit-chart]');
+      if (!(d.price > 0 && d.perCan > 0)) {
+        empty(host, '売る値段と単価を入れると、ここに比較が出ます。');
+        return;
+      }
+      var max = Math.max(d.price, d.perCan);
+      var neg = d.margin < 0;
+
+      host.innerHTML =
+        '<div class="balance">' +
+          '<div class="balance-row"><span class="balance-label">お店に売る値段<small>1缶・税抜</small></span>' +
+            '<span class="balance-bar"><span class="fill is-rev" style="width:' +
+              (d.price / max * 100).toFixed(1) + '%"></span>' +
+            '<span class="amt">' + fmt(d.price, 1) + '円</span></span></div>' +
+          '<div class="balance-row"><span class="balance-label">かかるお金<small>1缶あたり</small></span>' +
+            '<span class="balance-bar"><span class="fill" style="width:' +
+              (d.perCan / max * 100).toFixed(1) + '%"></span>' +
+            '<span class="amt">' + fmt(d.perCan, 1) + '円</span></span></div>' +
+          '<div class="balance-result' + (neg ? '' : ' is-pos') + '">' +
+            '<span class="r-label">1缶で残るお金</span>' +
+            '<span class="r-value">' + (neg ? '▲' : '＋') + fmt(Math.abs(d.margin), 1) + '円</span>' +
+            '<span class="r-note">' + (neg
+              ? '1缶売るごとに' + fmt(Math.abs(d.margin), 1) + '円ずつ減ります。'
+              : d.cans ? '全部売れれば ' + fmt(d.margin * d.cans) + '円 残ります（無償で渡すぶんを除く）。' : '') +
+            '</span>' +
+          '</div>' +
+        '</div>' +
+        '<ul class="viz-legend">' +
+          '<li><span class="sw" style="background:var(--v-rev)"></span>売る値段</li>' +
+          '<li><span class="sw" style="background:var(--v-cost)"></span>かかるお金（原価）</li>' +
+        '</ul>';
+    }
+
+    function paintStockChart(d) {
+      var host = wrap.querySelector('[data-stock-chart]');
+      if (!d.cans) { empty(host, '作る本数を入れると、ここに在庫の残りが出ます。'); return; }
+
+      var left = Math.max(0, d.left);
+      var over = d.left < 0;
+      var base = over ? (d.paid + d.free) : d.cans;
+      var seg = [
+        { cls: 'seg-rev', label: '売る',   n: d.paid },
+        { cls: 'seg-2',   label: '無償',   n: d.free },
+        { cls: 'seg-4',   label: '残り',   n: left }
+      ].filter(function (s) { return s.n > 0; });
+
+      host.innerHTML =
+        (seg.length
+          ? '<div class="stack">' + seg.map(function (s) {
+              var p = (s.n / base * 100).toFixed(1);
+              return '<span class="' + s.cls + '" style="width:' + p + '%" title="' +
+                     s.label + ' ' + s.n + '缶（' + p + '%）"></span>';
+            }).join('') + '</div>' +
+            '<div class="stack-labels">' + seg.map(function (s) {
+              return '<span style="width:' + (s.n / base * 100).toFixed(1) + '%">' + s.label +
+                     '<b>' + fmt(s.n) + '缶</b><em>' + (s.n / base * 100).toFixed(0) + '%</em></span>';
+            }).join('') + '</div>'
+          : '<p class="l2-empty">出荷先を入れると、ここに残りが出ます。</p>') +
+        (over
+          ? '<p class="viz-note"><strong>作る本数を' + fmt(-d.left) + '缶 超えています。</strong>' +
+            '本数か出荷先を見直してください。</p>'
+          : '<p class="viz-note">残り <strong>' + fmt(left) + '缶</strong>。' +
+            '無償で渡すぶんは売上になりません。</p>');
+    }
+
+    /* ---- 入力の受け取り ---- */
+
+    function applyInput(t) {
+      if (t.dataset.base) { state.base[t.dataset.base] = t.value; }
+      else if (t.dataset.c) { state.costs[+t.closest('tr').dataset.i][t.dataset.c] = t.value; }
+      else if (t.dataset.s) { state.stock[+t.closest('tr').dataset.i][t.dataset.s] = t.value; }
+      else return;
+      persist();
+      paint();
+    }
+
+    wrap.addEventListener('input', function (e) { applyInput(e.target); });
+    // select で input を出さないブラウザのための保険（二重に呼んでも結果は同じ）
+    wrap.addEventListener('change', function (e) {
+      if (e.target.tagName === 'SELECT') applyInput(e.target);
+    });
+
+    wrap.addEventListener('click', function (e) {
+      var btn = e.target.closest('button');
+      if (!btn) return;
+
+      if (btn.hasAttribute('data-add-cost')) {
+        state.costs.push({ item: '', unit: 'lot', amount: '' });
+      } else if (btn.hasAttribute('data-del-cost')) {
+        state.costs.splice(+btn.closest('tr').dataset.i, 1);
+      } else if (btn.hasAttribute('data-add-stock')) {
+        state.stock.push({ to: '', kind: 'paid', qty: '' });
+      } else if (btn.hasAttribute('data-del-stock')) {
+        state.stock.splice(+btn.closest('tr').dataset.i, 1);
+      } else if (btn.hasAttribute('data-fill')) {
+        if (!confirm('第1ロットの数字をひな形として入れます。今の入力は上書きされます。よろしいですか？')) return;
+        state.base = {
+          cans: preset.base.cans, perCase: preset.base.perCase,
+          shops: preset.base.shops, price: preset.base.price
+        };
+        state.costs = preset.costs.map(function (c) {
+          return { item: c.item, unit: c.unit, amount: c.amount };
+        });
+      } else return;
+
+      persist();
+      rebuild();
+    });
+
+    rebuild();
+  }
+
+  /* ------------------------------------------------------ AIに質問 */
+
+  // 本文（HTML）を、AIに渡せるテキストにする。表はセルを | でつなぐ。
+  function htmlToText(html) {
+    var root = document.createElement('div');
+    root.innerHTML = html;
+    root.querySelectorAll('.waffle').forEach(function (w) { w.textContent = '（1マス＝1缶の図）'; });
+    // このページ自身の説明は資料ではないので渡さない
+    root.querySelectorAll('section[data-page="chat"], script, style, svg, [hidden]')
+        .forEach(function (e) { e.remove(); });
+
+    var built = root.querySelector('[data-build-date]');
+    if (built && window.NANONI_PAYLOAD.built) built.textContent = window.NANONI_PAYLOAD.built;
+
+    var out = [];
+    (function walk(node) {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        var c = node.childNodes[i];
+        if (c.nodeType === 3) { out.push(c.nodeValue.replace(/\s+/g, ' ')); continue; }
+        if (c.nodeType !== 1) continue;
+
+        var tag = c.tagName;
+        if (tag === 'TD' || tag === 'TH') { walk(c); out.push(' | '); }
+        else if (tag === 'TR') { walk(c); out.push('\n'); }
+        else if (/^H[1-4]$/.test(tag)) { out.push('\n\n## '); walk(c); out.push('\n'); }
+        else if (/^(P|DIV|LI|SECTION|FIGURE|FIGCAPTION|HEADER|FOOTER|ARTICLE|TABLE|UL|OL|DL|DT|DD|BR)$/.test(tag)) {
+          out.push('\n'); walk(c); out.push('\n');
+        } else { walk(c); }
+      }
+    })(root);
+
+    return out.join('')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/ *\n */g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function initChat() {
+    var sec = docEl.querySelector('#chat');
+    if (!sec) return;
+
+    var key = '';
+    try { key = localStorage.getItem(APIKEY_KEY) || ''; } catch (e) {}
+
+    var history = [];   // { role, text }
+    var busy = false;
+    var abort = null;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'chat';
+    wrap.innerHTML =
+      '<details class="chat-key"' + (key ? '' : ' open') + '>' +
+        '<summary>APIキーの設定<span class="chat-key-state" data-key-state></span></summary>' +
+        '<p class="chat-key-note">' +
+          'キーはこの端末のブラウザにだけ保存されます。ほかの人には渡りません。' +
+          '共有パソコンで使ったときは、終わったら「消す」を押してください。' +
+        '</p>' +
+        '<div class="chat-key-row">' +
+          '<input type="password" data-key placeholder="sk-ant-…" spellcheck="false" autocomplete="off">' +
+          '<button type="button" data-key-save>保存</button>' +
+          '<button type="button" data-key-clear>消す</button>' +
+        '</div>' +
+        '<p class="prog-io-msg" data-key-msg role="status" aria-live="polite"></p>' +
+      '</details>' +
+
+      '<div class="chat-log" data-log aria-live="polite"></div>' +
+
+      '<div class="chat-chips" data-chips></div>' +
+
+      '<form class="chat-form" data-form>' +
+        '<textarea data-input rows="2" placeholder="質問を入力（Enterで送信・Shift+Enterで改行）" ' +
+          'spellcheck="false"></textarea>' +
+        '<div class="chat-form-btns">' +
+          '<button type="submit" data-send>送る</button>' +
+          '<button type="button" data-stop hidden>止める</button>' +
+          '<button type="button" data-clear-log>やりとりを消す</button>' +
+        '</div>' +
+      '</form>' +
+
+      '<p class="chat-foot">' +
+        'モデルは Claude Opus 5。答えはこのサイトに書かれている内容だけを元にしています。' +
+        'やりとりは保存されず、ページを離れると消えます。' +
+      '</p>';
+
+    sec.appendChild(wrap);
+
+    var logEl   = wrap.querySelector('[data-log]');
+    var inputEl = wrap.querySelector('[data-input]');
+    var keyEl   = wrap.querySelector('[data-key]');
+    var keyMsg  = wrap.querySelector('[data-key-msg]');
+    var sendBtn = wrap.querySelector('[data-send]');
+    var stopBtn = wrap.querySelector('[data-stop]');
+
+    keyEl.value = key;
+    paintKeyState();
+
+    // 質問の例。押すとそのまま入力欄に入る
+    var CHIPS = [
+      '1缶で残るお金が少ないのはなぜ？',
+      'いちばん減らせる費用はどれ？',
+      '第2ロットを300本にしたら、いくらかかる？',
+      '赤字になっているお店はどこ？',
+      'まだ分かっていないことを箇条書きにして',
+      '免許を取ると何が変わる？'
+    ];
+    wrap.querySelector('[data-chips]').innerHTML = CHIPS.map(function (c) {
+      return '<button type="button" class="chat-chip">' + esc(c) + '</button>';
+    }).join('');
+
+    function paintKeyState() {
+      wrap.querySelector('[data-key-state]').textContent = key ? '設定済み' : '未設定';
+      wrap.querySelector('[data-key-state]').className = 'chat-key-state' + (key ? ' is-on' : '');
+    }
+
+    function keyNote(t) {
+      keyMsg.textContent = t;
+      setTimeout(function () { keyMsg.textContent = ''; }, 4000);
+    }
+
+    wrap.querySelector('[data-key-save]').addEventListener('click', function () {
+      var v = keyEl.value.trim();
+      if (!v) { keyNote('キーを入力してください'); return; }
+      key = v;
+      try { localStorage.setItem(APIKEY_KEY, key); } catch (e) { keyNote('保存できませんでした（このまま使えます）'); }
+      paintKeyState();
+      keyNote('保存しました');
+      wrap.querySelector('.chat-key').open = false;
+      inputEl.focus();
+    });
+
+    wrap.querySelector('[data-key-clear]').addEventListener('click', function () {
+      key = '';
+      keyEl.value = '';
+      try { localStorage.removeItem(APIKEY_KEY); } catch (e) {}
+      paintKeyState();
+      keyNote('消しました');
+    });
+
+    wrap.querySelector('[data-chips]').addEventListener('click', function (e) {
+      var chip = e.target.closest('.chat-chip');
+      if (!chip) return;
+      inputEl.value = chip.textContent;
+      inputEl.focus();
+    });
+
+    wrap.querySelector('[data-clear-log]').addEventListener('click', function () {
+      if (busy) return;
+      history = [];
+      logEl.innerHTML = '';
+    });
+
+    stopBtn.addEventListener('click', function () { if (abort) abort.abort(); });
+
+    inputEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        wrap.querySelector('[data-form]').requestSubmit();
+      }
+    });
+
+    wrap.querySelector('[data-form]').addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (busy) return;
+      var q = inputEl.value.trim();
+      if (!q) return;
+      if (!key) {
+        wrap.querySelector('.chat-key').open = true;
+        keyNote('先にAPIキーを設定してください');
+        keyEl.focus();
+        return;
+      }
+      inputEl.value = '';
+      ask(q);
+    });
+
+    /* ---- 表示 ---- */
+
+    function bubble(role) {
+      var el = document.createElement('div');
+      el.className = 'chat-msg is-' + role;
+      el.innerHTML = '<p class="chat-who">' + (role === 'user' ? 'あなた' : 'AI') + '</p>' +
+                     '<div class="chat-body"></div>';
+      logEl.appendChild(el);
+      el.scrollIntoView({ block: 'nearest' });
+      return el.querySelector('.chat-body');
+    }
+
+    // 見出し・箇条書き・太字だけの、ごく軽いMarkdown表示
+    function toHtml(text) {
+      var lines = String(text).split('\n');
+      var out = [], list = false;
+
+      function inline(s) {
+        return esc(s)
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/`([^`]+)`/g, '<code>$1</code>');
+      }
+      lines.forEach(function (raw) {
+        var l = raw.trim();
+        var m = l.match(/^[-*・]\s+(.*)$/);
+        if (m) {
+          if (!list) { out.push('<ul>'); list = true; }
+          out.push('<li>' + inline(m[1]) + '</li>');
+          return;
+        }
+        if (list) { out.push('</ul>'); list = false; }
+        if (!l) return;
+        var h = l.match(/^#{1,4}\s+(.*)$/);
+        out.push(h ? '<p class="chat-h">' + inline(h[1]) + '</p>' : '<p>' + inline(l) + '</p>');
+      });
+      if (list) out.push('</ul>');
+      return out.join('');
+    }
+
+    function setBusy(on) {
+      busy = on;
+      sendBtn.disabled = on;
+      sendBtn.textContent = on ? '答えています…' : '送る';
+      stopBtn.hidden = !on;
+    }
+
+    /* ---- API 呼び出し（ブラウザから直接） ---- */
+
+    function systemBlocks() {
+      var blocks = [{
+        type: 'text',
+        text:
+          'あなたは NANONI / 24CLUB（愛知県蟹江町のクラフト発泡酒ブランド）の事業について、' +
+          '関係者3人の質問に日本語で答えるアシスタントです。\n\n' +
+          '守ること:\n' +
+          '- 下の資料に書かれている数字だけを使う。書かれていない数字を作らない。\n' +
+          '- 資料にないことを聞かれたら「資料には書かれていません」とはっきり言う。\n' +
+          '- 計算するときは、途中の式を短く示す。\n' +
+          '- 専門用語（粗利・損益分岐点など）を使うときは、かっこで意味を添える。\n' +
+          '- 答えは短くまとめる。長い一覧は箇条書きにする。\n\n' +
+          '=== 資料ここから ===\n' + CONTEXT_TEXT + '\n=== 資料ここまで ===',
+        cache_control: { type: 'ephemeral' }
+      }];
+
+      // 第2ロットのページに入力があれば、それも渡す
+      var lot2 = readStore(LOT2_KEY, null);
+      if (lot2) {
+        blocks.push({
+          type: 'text',
+          text: '第2ロットのページに入力されている内容（まだ検討中の数字）:\n' + JSON.stringify(lot2)
+        });
+      }
+      return blocks;
+    }
+
+    function ask(question) {
+      bubble('user').innerHTML = toHtml(question);
+      history.push({ role: 'user', text: question });
+
+      var body = bubble('ai');
+      body.innerHTML = '<p class="chat-wait">考えています…</p>';
+      setBusy(true);
+
+      abort = new AbortController();
+      var text = '';
+
+      fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        signal: abort.signal,
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          // ブラウザから直接呼ぶには、この指定が要る
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-opus-5',
+          max_tokens: 16000,
+          stream: true,
+          thinking: { type: 'adaptive' },
+          system: systemBlocks(),
+          messages: history.map(function (m) {
+            return { role: m.role, content: [{ type: 'text', text: m.text }] };
+          })
+        })
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.text().then(function (t) { throw new Error(apiError(res.status, t)); });
+        }
+        return readStream(res, function (chunk) {
+          text += chunk;
+          body.innerHTML = toHtml(text);
+          body.scrollIntoView({ block: 'nearest' });
+        });
+      })
+      .then(function (info) {
+        if (info && info.stop === 'refusal') {
+          body.innerHTML = '<p class="chat-err">この質問には答えられませんでした。' +
+                           '聞き方を変えてもう一度お試しください。</p>';
+          history.pop();
+          return;
+        }
+        if (!text.trim()) {
+          body.innerHTML = '<p class="chat-err">答えが返りませんでした。もう一度お試しください。</p>';
+          history.pop();
+          return;
+        }
+        history.push({ role: 'assistant', text: text });
+      })
+      .catch(function (err) {
+        if (err && err.name === 'AbortError') {
+          if (!text.trim()) { body.innerHTML = '<p class="chat-err">止めました。</p>'; history.pop(); }
+          else history.push({ role: 'assistant', text: text });
+          return;
+        }
+        body.innerHTML = '<p class="chat-err">' + esc(err.message || '通信に失敗しました。') + '</p>';
+        history.pop();
+      })
+      .then(function () { setBusy(false); abort = null; });
+    }
+
+    function apiError(status, raw) {
+      var msg = '';
+      try { msg = (JSON.parse(raw).error || {}).message || ''; } catch (e) {}
+      if (status === 401) return 'APIキーが正しくないようです（401）。設定を確認してください。';
+      if (status === 403) return 'このAPIキーでは使えませんでした（403）。' + msg;
+      if (status === 429) return '短時間に送りすぎです（429）。少し待ってからもう一度お試しください。';
+      if (status >= 500)  return 'Anthropic側で一時的な問題が起きています（' + status + '）。少し待ってお試しください。';
+      return 'エラー（' + status + '）' + (msg ? '：' + msg : '');
+    }
+
+    // SSE を読みながら、本文の差分だけを渡す
+    function readStream(res, onText) {
+      var reader = res.body.getReader();
+      var dec = new TextDecoder();
+      var buf = '';
+      var info = { stop: null };
+
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) return info;
+          buf += dec.decode(r.value, { stream: true });
+
+          var parts = buf.split('\n\n');
+          buf = parts.pop();
+
+          parts.forEach(function (block) {
+            block.split('\n').forEach(function (line) {
+              if (line.indexOf('data:') !== 0) return;
+              var payload = line.slice(5).trim();
+              if (!payload || payload === '[DONE]') return;
+              var ev;
+              try { ev = JSON.parse(payload); } catch (e) { return; }
+
+              if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+                onText(ev.delta.text);
+              } else if (ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason) {
+                info.stop = ev.delta.stop_reason;
+              } else if (ev.type === 'error') {
+                throw new Error((ev.error && ev.error.message) || 'エラーが返りました。');
+              }
+            });
+          });
+          return pump();
+        });
+      }
+      return pump();
+    }
   }
 
   /* ---------------------------------------------------------- 簡易版 */
