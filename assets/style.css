@@ -745,6 +745,332 @@ h3::before {
 .flow-step { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; color: var(--accent); font-weight: 700; }
 .flow-body { margin-top: 7px !important; font-size: 13.5px; line-height: 1.7; }
 
+/* ==========================================================================
+   図表（チャート）
+   色は dataviz の検証スクリプトで light/dark 両モードとも全チェック通過済み。
+   ライト: #b5822f / #0d6e9e  ダーク: #bb8a35 / #3590c0
+   ========================================================================== */
+
+.viz {
+  --v-cost:  #b5822f;   /* 支払い・原価 */
+  --v-rev:   #0d6e9e;   /* 入金・売価 */
+  --v-c1:    #855c18;   /* 逐次ランプ 濃 */
+  --v-c2:    #b5822f;
+  --v-c3:    #d4a659;
+  --v-c4:    #e8cfa0;   /* 逐次ランプ 淡 */
+  --v-unk:   #8a8377;   /* 不明・未確定（必ずハッチ＋ラベルを併用） */
+  --v-grid:  var(--line);
+
+  margin: 0 0 20px;
+  padding: 18px 20px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+@media (prefers-color-scheme: dark) {
+  .viz {
+    --v-cost: #bb8a35;
+    --v-rev:  #3590c0;
+    --v-c1:   #dcb15f;
+    --v-c2:   #bb8a35;
+    --v-c3:   #946f2b;
+    --v-c4:   #6b5222;
+    --v-unk:  #7d766a;
+  }
+}
+
+.viz-title {
+  margin: 0 0 3px;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.viz-sub {
+  margin: 0 0 16px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.viz-note {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.viz-note strong { color: var(--ink-2); }
+
+/* --- 凡例 --- */
+
+.viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.viz-legend li { display: flex; align-items: center; gap: 6px; }
+.viz-legend .sw {
+  width: 11px; height: 11px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.viz-legend .sw-unk { background-image: var(--hatch); background-color: var(--v-unk); }
+
+/* 不明・未確定を表すハッチ（テクスチャ＝二次エンコード） */
+.viz { --hatch: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px); }
+@media (prefers-color-scheme: dark) {
+  .viz { --hatch: repeating-linear-gradient(135deg, rgba(0,0,0,.42) 0 3px, transparent 3px 7px); }
+}
+
+/* --- 横積み上げバー（構成比） --- */
+
+.stack {
+  display: flex;
+  gap: 2px;                 /* サーフェス色の2pxギャップで区切る（枠線は引かない） */
+  height: 22px;             /* バーは24px以下 */
+  margin: 0;
+}
+.stack > span {
+  display: block;
+  min-width: 2px;
+  background: var(--v-c2);
+}
+.stack > span:first-child { border-radius: 4px 0 0 4px; }
+.stack > span:last-child  { border-radius: 0 4px 4px 0; }
+.stack > span:only-child   { border-radius: 4px; }
+
+.stack .seg-1 { background: var(--v-c1); }
+.stack .seg-2 { background: var(--v-c2); }
+.stack .seg-3 { background: var(--v-c3); }
+.stack .seg-4 { background: var(--v-c4); }
+.stack .seg-cost { background: var(--v-cost); }
+.stack .seg-rev  { background: var(--v-rev); }
+.stack .seg-unk  {
+  background-color: var(--v-unk);
+  background-image: var(--hatch);
+}
+
+/* 積み上げバーの直付けラベル */
+.stack-labels {
+  display: flex;
+  gap: 2px;
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.stack-labels > span { min-width: 0; }
+.stack-labels b { display: block; font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.stack-labels em { display: block; font-style: normal; color: var(--muted); font-size: 10.5px; }
+
+/* --- 横棒グラフ（大小比較） --- */
+
+.barchart { display: grid; gap: 10px; margin: 0; }
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(74px, 108px) minmax(0, 1fr) minmax(76px, auto);
+  align-items: center;
+  gap: 12px;
+}
+.bar-row .bar-name { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.bar-row .bar-track { height: 18px; }
+.bar-row .bar-fill {
+  display: block;
+  height: 18px;
+  background: var(--v-cost);
+  border-radius: 0 4px 4px 0;   /* ベースライン側は角を落とさない */
+  min-width: 2px;
+}
+.bar-row .bar-fill.is-rev { background: var(--v-rev); }
+.bar-row .bar-fill.is-mute { background: var(--v-c4); }
+.bar-row .bar-val {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.bar-row .bar-val small { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+
+/* --- 収支の対比 --- */
+
+.balance { display: grid; gap: 14px; }
+
+.balance-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 130px) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.balance-label { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.balance-label small { display: block; color: var(--muted); font-size: 10.5px; }
+
+.balance-bar { display: flex; align-items: center; gap: 9px; }
+.balance-bar .fill {
+  height: 24px;
+  border-radius: 0 4px 4px 0;
+  background: var(--v-cost);
+}
+.balance-bar .fill.is-rev { background: var(--v-rev); }
+.balance-bar .amt { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.balance-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin-top: 4px;
+  padding: 13px 16px;
+  border-radius: 10px;
+  background: var(--red-bg);
+}
+.balance-result .r-label { font-size: 11.5px; font-weight: 700; color: var(--red); letter-spacing: .04em; }
+.balance-result .r-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--red);
+}
+.balance-result .r-note { font-size: 11.5px; color: var(--ink-2); line-height: 1.6; }
+
+/* --- 1本あたりの内訳 --- */
+
+.unit-grid { display: grid; gap: 16px; }
+
+.unit-row .unit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.unit-row .unit-head b { font-size: 14px; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* --- 課金構造の対比カード --- */
+
+.charge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+
+.charge-card {
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.charge-card p { margin: 0; }
+.charge-head { font-size: 11px; letter-spacing: .08em; font-weight: 700; color: var(--muted); }
+.charge-unit {
+  margin: 8px 0 2px !important;
+  font-size: 21px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--v-cost);
+}
+.charge-unit small { font-size: .5em; color: var(--ink-2); margin-left: 3px; }
+.charge-body { margin-top: 8px !important; font-size: 12px; line-height: 1.7; color: var(--ink-2); }
+
+.charge-dots { display: flex; flex-wrap: wrap; gap: 3px; margin: 10px 0 0 !important; }
+.charge-dots i { width: 7px; height: 11px; border-radius: 2px; background: var(--v-c3); }
+.charge-dots i.is-case { width: 15px; background: var(--v-c1); }
+
+/* --- 商流フロー（矢印つき） --- */
+
+.moneyflow { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; counter-reset: mf; }
+
+.moneyflow li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 0 20px 0;
+}
+.moneyflow li:last-child { padding-bottom: 0; }
+
+.moneyflow li::before {
+  counter-increment: mf;
+  content: counter(mf);
+  grid-column: 1;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+/* ステップ間をつなぐ縦線 */
+.moneyflow li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 14px; top: 34px; bottom: 6px;
+  width: 2px;
+  background: var(--line);
+}
+
+.mf-body { padding-top: 3px; }
+.mf-actor { font-size: 13px; font-weight: 700; line-height: 1.5; }
+.mf-desc { margin: 3px 0 0; font-size: 12px; line-height: 1.7; color: var(--ink-2); }
+.mf-tag {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--blue-bg);
+  color: var(--blue);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.mf-tag.is-money { background: color-mix(in srgb, var(--v-rev) 16%, transparent); color: var(--v-rev); }
+
+/* --- 誤りの対比 --- */
+
+.diff-bars { display: grid; gap: 12px; }
+.diff-row { display: grid; grid-template-columns: 46px minmax(0, 1fr); align-items: center; gap: 12px; }
+.diff-tag {
+  padding: 3px 0;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.diff-row.is-bad .diff-tag { background: var(--red-bg); color: var(--red); }
+.diff-row.is-ok  .diff-tag { background: var(--green-bg); color: var(--green); }
+.diff-bar { display: flex; align-items: center; gap: 9px; }
+.diff-bar .fill { height: 20px; border-radius: 0 4px 4px 0; background: var(--v-c4); }
+.diff-row.is-bad .fill { background: var(--v-unk); background-image: var(--hatch); }
+.diff-row.is-ok  .fill { background: var(--v-cost); }
+.diff-bar .amt { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.diff-bar .amt small { font-weight: 400; font-size: 11px; color: var(--muted); margin-left: 4px; }
+
+@media (max-width: 560px) {
+  .viz { padding: 15px 14px 14px; }
+  .bar-row { grid-template-columns: minmax(62px, 84px) minmax(0, 1fr); row-gap: 4px; }
+  .bar-row .bar-val { grid-column: 2; text-align: left; }
+  .balance-row { grid-template-columns: 1fr; gap: 6px; }
+  .stack-labels { font-size: 10px; }
+}
+
+@media print {
+  .viz { break-inside: avoid; }
+  .stack > span, .bar-fill, .balance-bar .fill, .diff-bar .fill {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
 /* --- 検索ハイライト --- */
 
 section.filtered-out { display: none; }
