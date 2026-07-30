@@ -91,13 +91,43 @@ python3 -m http.server 8000
 ## ファイル構成
 
 ```
-index.html          ロック画面 + 本体の骨組み
-payload.js          暗号化された本文（★リポジトリに入るのはこれだけ）
-assets/style.css    スタイル（ライト/ダーク・印刷対応）
-assets/app.js       復号・目次生成・スクロール連動・キーワード絞り込み
-tools/build.py      暗号化 / 復号ツール
-src/content.html    本文の平文（.gitignore 対象。commit されません）
+index.html              ロック画面 + 本体の骨組み
+payload.js              暗号化された本文（★リポジトリに入るのはこれだけ）
+manifest.webmanifest    ホーム画面アイコン・表示名（Android Chrome 用）
+assets/style.css        スタイル（ライト/ダーク・印刷対応）
+assets/app.js           復号・目次生成・スクロール連動・キーワード絞り込み
+assets/icon.svg         アイコンの原本（これを編集して PNG を作り直す）
+assets/icon-*.png       32/180/192/512。180 は iOS、192・512 は Android が使う
+tools/build.py          暗号化 / 復号ツール
+tools/make-icons.js     icon.svg から PNG を生成する
+src/content.html        本文の平文（.gitignore 対象。commit されません）
 ```
+
+## ホーム画面アイコンを変える
+
+`assets/icon.svg` を編集してから PNG を作り直します。
+
+```bash
+npm install playwright-core     # 初回のみ
+node tools/make-icons.js        # icon.svg → icon-32/180/192/512.png
+```
+
+アイコンの割り当ては次のとおりです。
+
+| 対象 | 使われるファイル | 指定場所 |
+|---|---|---|
+| iOS（ホーム画面） | `assets/icon-180.png` | `index.html` の `apple-touch-icon` |
+| iOS（アイコン下の名前） | — | `index.html` の `apple-mobile-web-app-title` |
+| Android Chrome | `assets/icon-192.png` / `icon-512.png` | `manifest.webmanifest` |
+| Android（表示名） | — | `manifest.webmanifest` の `short_name` |
+| ブラウザのタブ | `assets/icon.svg` / `icon-32.png` | `index.html` の `rel="icon"` |
+
+> **iOS は SVG も manifest も見ません。** `apple-touch-icon` の PNG がないと、
+> ホーム画面にはページのスクリーンショットが縮小されて置かれます。
+
+> **アイコンを変えても端末側では古いまま表示されます。**
+> iOS・Android とも強くキャッシュするため、確認するときは
+> **ホーム画面から一度削除して、追加し直してください。**
 
 ## 使い方のメモ
 

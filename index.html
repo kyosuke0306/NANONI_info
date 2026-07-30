@@ -6,7 +6,24 @@
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
 <meta name="referrer" content="no-referrer">
 <title>NANONI / 24CLUB — 関係者限定</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f2a22'/%3E%3Ctext x='16' y='22' font-family='Helvetica,Arial,sans-serif' font-size='16' font-weight='bold' fill='%23d9a961' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E">
+
+<!-- ブラウザのタブ用 -->
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
+
+<!-- iOS：ホーム画面に追加したときのアイコンと名前。iOS は SVG も manifest も見ないので
+     apple-touch-icon（180×180 PNG）が必須 -->
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="apple-mobile-web-app-title" content="NANONI">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<!-- Android Chrome：アイコンと表示名は manifest 側 -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16150f" media="(prefers-color-scheme: dark)">
+
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
