@@ -1,0 +1,9 @@
+# 本文の平文はコミットしない（このリポジトリは public）。
+# 編集したいときは tools/build.py decrypt で payload.js から復元する。
+src/content.html
+
+# 作業ファイル
+*.pyc
+__pycache__/
+.DS_Store
+node_modules/
