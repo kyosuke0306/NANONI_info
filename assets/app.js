@@ -114,9 +114,16 @@
   /* ---------------------------------------------------------- 簡易版 */
 
   // 図（figure.viz）と見出しだけを残し、文章・表・カード類を落とす。
+  //
+  // 個別に出し分けたいものは本文側で指定する（app.js に文言を書かない）。
+  //   data-simple="hide"          … 簡易版では表示しない章・図
+  //   data-simple-title="…"       … 簡易版でだけ使う見出し
   function simplify() {
     var lede = docEl.querySelector('.lede');
     if (lede) lede.remove();
+
+    // 本文側で「簡易版では出さない」と指定されたものを先に落とす
+    docEl.querySelectorAll('[data-simple="hide"]').forEach(function (el) { el.remove(); });
 
     Array.prototype.slice.call(docEl.querySelectorAll('section')).forEach(function (sec) {
       var figures = sec.querySelectorAll(':scope > figure.viz');
@@ -128,7 +135,8 @@
       var h2 = sec.querySelector(':scope > h2');
       if (h2) {
         // 通常版と番号がとびとびになるため、見出しの連番は外す
-        h2.textContent = h2.textContent.replace(/^\s*\d+\.\s*/, '');
+        h2.textContent = h2.dataset.simpleTitle ||
+                         h2.textContent.replace(/^\s*\d+\.\s*/, '');
         keep.push(h2);
       }
       Array.prototype.forEach.call(figures, function (f) { keep.push(f); });
