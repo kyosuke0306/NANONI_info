@@ -11,9 +11,20 @@
 
   var SESSION_KEY = 'nanoni.unlocked.v1';
 
-  // 通常版と簡易版で同じ payload.js を使い、簡易版は復号後に図だけを残す。
+  // 3つのページで同じ payload.js を使い、復号後に必要な部分だけを残す。
   // （本文を二重に持たないため）
-  var MODE = document.documentElement.dataset.mode === 'simple' ? 'simple' : 'full';
+  //   full     … 通常版。スケジュールの章だけ外す
+  //   simple   … 簡易版。図だけを残す
+  //   schedule … スケジュール。その章だけを残し、進捗の記録UIを足す
+  var MODES = { full: 1, simple: 1, schedule: 1 };
+  var MODE = MODES[document.documentElement.dataset.mode] ? document.documentElement.dataset.mode : 'full';
+
+  var PROGRESS_KEY = 'nanoni.progress.v1';
+  var STATUSES = [
+    { id: 'todo',  label: '未着手' },
+    { id: 'doing', label: '進行中' },
+    { id: 'done',  label: '完了' }
+  ];
 
   var gate     = document.getElementById('gate');
   var gateForm = document.getElementById('gate-form');
@@ -101,7 +112,9 @@
 
   function render(html) {
     docEl.innerHTML = html;
+    routePages();
     if (MODE === 'simple') simplify();
+    if (MODE === 'schedule') initProgress();
     stampBuildDate();
     wrapWideTables();
     buildToc();
@@ -109,6 +122,166 @@
     initSearch();
     initToTop();
     initNav();
+  }
+
+  /* ------------------------------------------------- ページの振り分け */
+
+  // data-page="schedule" が付いた章はスケジュールページ専用。
+  function routePages() {
+    if (MODE === 'schedule') {
+      docEl.querySelectorAll('section:not([data-page="schedule"])').forEach(function (s) { s.remove(); });
+      var lede = docEl.querySelector('.lede');
+      if (lede) lede.remove();
+    } else {
+      docEl.querySelectorAll('[data-page="schedule"]').forEach(function (s) { s.remove(); });
+    }
+  }
+
+  /* ------------------------------------------------------- 進捗の記録 */
+
+  function loadProgress() {
+    try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+
+  function saveProgress(data) {
+    try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(data)); return true; }
+    catch (e) { return false; }
+  }
+
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+
+  function initProgress() {
+    var gantt = docEl.querySelector('[data-gantt]');
+    if (!gantt) return;
+
+    var rows = Array.prototype.slice.call(gantt.querySelectorAll('.gt-row[data-task]'));
+    if (!rows.length) return;
+
+    var state = loadProgress();
+
+    var panel = document.createElement('section');
+    panel.id = 'progress';
+    panel.innerHTML =
+      '<h2>進捗の記録</h2>' +
+      '<div class="callout callout-note">' +
+        '<p class="callout-title">この端末にだけ保存されます</p>' +
+        '<p>記録はブラウザの中に保存されるため、<strong>ほかの人の画面には出ません</strong>。' +
+        '共有したいときは下の「記録を書き出す」でコピーして渡し、相手が「読み込む」に貼り付けてください。</p>' +
+      '</div>' +
+      '<div class="prog-summary">' +
+        '<p class="prog-count"><b data-done>0</b> / <span data-total>0</span> 完了</p>' +
+        '<div class="prog-meter"><span data-meter style="width:0%"></span></div>' +
+      '</div>' +
+      '<table class="tbl prog-table"><thead><tr>' +
+        '<th>作業</th><th style="width:44%">状態</th><th style="width:16%">更新日</th>' +
+      '</tr></thead><tbody data-prog-body></tbody></table>' +
+      '<details class="prog-io"><summary>記録の書き出し / 読み込み</summary>' +
+        '<p class="prog-io-note">下の文字列をコピーして渡すと、相手の画面でも同じ進捗になります。' +
+        '受け取った文字列を貼り付けて「読み込む」を押してください。</p>' +
+        '<textarea data-io rows="3" spellcheck="false"></textarea>' +
+        '<div class="prog-io-btns">' +
+          '<button type="button" data-copy>コピーする</button>' +
+          '<button type="button" data-load>読み込む</button>' +
+          '<button type="button" data-reset>すべて未着手に戻す</button>' +
+        '</div>' +
+        '<p class="prog-io-msg" data-io-msg role="status" aria-live="polite"></p>' +
+      '</details>';
+
+    docEl.querySelector('#schedule').appendChild(panel);
+
+    var tbody = panel.querySelector('[data-prog-body]');
+
+    rows.forEach(function (row) {
+      var id = row.dataset.task;
+      var name = row.querySelector('.gt-name').textContent.trim();
+      var bar = row.querySelector('.gt-bar > span');
+      var when = bar ? bar.textContent.trim() : '';
+
+      var tr = document.createElement('tr');
+      tr.dataset.task = id;
+      tr.innerHTML =
+        '<td>' + name + (when ? '<span class="sub"> ／ ' + when + '</span>' : '') + '</td>' +
+        '<td><div class="prog-btns" role="group" aria-label="' + name + ' の状態">' +
+          STATUSES.map(function (s) {
+            return '<button type="button" data-set="' + s.id + '">' + s.label + '</button>';
+          }).join('') +
+        '</div></td>' +
+        '<td class="prog-at"></td>';
+      tbody.appendChild(tr);
+    });
+
+    // 状態の反映
+    function paint() {
+      var done = 0;
+      rows.forEach(function (row) {
+        var id = row.dataset.task;
+        var rec = state[id] || {};
+        var st = rec.status || 'todo';
+        if (st === 'done') done++;
+
+        row.classList.remove('is-todo', 'is-doing', 'is-done');
+        row.classList.add('is-' + st);
+
+        var tr = tbody.querySelector('tr[data-task="' + id + '"]');
+        tr.querySelectorAll('[data-set]').forEach(function (b) {
+          b.classList.toggle('is-on', b.dataset.set === st);
+        });
+        tr.querySelector('.prog-at').textContent = st === 'todo' ? '' : (rec.at || '');
+      });
+
+      panel.querySelector('[data-done]').textContent = done;
+      panel.querySelector('[data-total]').textContent = rows.length;
+      panel.querySelector('[data-meter]').style.width = (done / rows.length * 100) + '%';
+      panel.querySelector('[data-io]').value = JSON.stringify(state);
+    }
+
+    tbody.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-set]');
+      if (!btn) return;
+      var id = btn.closest('tr').dataset.task;
+      var st = btn.dataset.set;
+      if (st === 'todo') delete state[id];
+      else state[id] = { status: st, at: today() };
+      if (!saveProgress(state)) msg('保存できませんでした（ブラウザの設定を確認してください）');
+      paint();
+    });
+
+    var ioMsg = panel.querySelector('[data-io-msg]');
+    function msg(t) { ioMsg.textContent = t; setTimeout(function () { ioMsg.textContent = ''; }, 4000); }
+
+    panel.querySelector('[data-copy]').addEventListener('click', function () {
+      var ta = panel.querySelector('[data-io]');
+      ta.select();
+      navigator.clipboard ? navigator.clipboard.writeText(ta.value).then(function () { msg('コピーしました'); },
+                                                                        function () { msg('コピーできませんでした。手動で選択してください'); })
+                          : msg('手動で選択してコピーしてください');
+    });
+
+    panel.querySelector('[data-load]').addEventListener('click', function () {
+      var raw = panel.querySelector('[data-io]').value.trim();
+      if (!raw) { msg('貼り付けてから押してください'); return; }
+      var parsed;
+      try { parsed = JSON.parse(raw); } catch (e) { msg('読み込めませんでした（形式が違います）'); return; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { msg('読み込めませんでした（形式が違います）'); return; }
+      state = parsed;
+      saveProgress(state);
+      paint();
+      msg('読み込みました');
+    });
+
+    panel.querySelector('[data-reset]').addEventListener('click', function () {
+      if (!confirm('記録をすべて未着手に戻します。よろしいですか？')) return;
+      state = {};
+      saveProgress(state);
+      paint();
+      msg('未着手に戻しました');
+    });
+
+    paint();
   }
 
   /* ---------------------------------------------------------- 簡易版 */

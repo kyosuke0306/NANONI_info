@@ -337,6 +337,10 @@ a:hover { border-bottom-color: var(--accent); }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3px;
+  /* 3つのときは縦積み。横に並べると「スケジュール」が入らない */
+}
+.mode-switch-3 { grid-template-columns: 1fr; }
+.mode-switch {
   margin-top: 12px;
   padding: 3px;
   border: 1px solid var(--line);
@@ -1421,6 +1425,126 @@ h3::before {
 }
 @media (prefers-color-scheme: dark) {
   .gt-bar > span.inside { color: #17160f; }
+}
+
+/* --- 進捗の記録 --- */
+
+.gt-row.is-done .gt-bar { opacity: .38; }
+.gt-row.is-done .gt-name { color: var(--muted); text-decoration: line-through; }
+.gt-row.is-done .gt-name::before {
+  content: "✓";
+  margin-right: 5px;
+  color: var(--green);
+  font-weight: 700;
+  text-decoration: none;
+}
+.gt-row.is-doing .gt-bar {
+  background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.4) 0 4px, transparent 4px 9px);
+}
+.gt-row.is-doing .gt-name::before {
+  content: "…";
+  margin-right: 5px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.prog-summary {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 15px 17px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.prog-count { margin: 0; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.prog-count b { font-size: 22px; color: var(--accent); }
+
+.prog-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-tint);
+  overflow: hidden;
+}
+.prog-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--green);
+  transition: width .25s ease;
+}
+
+.prog-table td { vertical-align: middle; }
+.prog-at { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+
+.prog-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.prog-btns button {
+  flex: 1 1 auto;
+  min-width: 62px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--sans);
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .13s, color .13s, border-color .13s;
+}
+.prog-btns button:hover { border-color: var(--accent); color: var(--accent); }
+
+.prog-btns button.is-on[data-set="todo"]  { background: var(--bg-tint);  color: var(--ink-2); border-color: var(--muted); font-weight: 700; }
+.prog-btns button.is-on[data-set="doing"] { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); font-weight: 700; }
+.prog-btns button.is-on[data-set="done"]  { background: var(--green-bg); color: var(--green); border-color: var(--green); font-weight: 700; }
+
+.prog-io {
+  margin-top: 18px;
+  padding: 13px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.prog-io > summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+.prog-io-note { margin: 12px 0 8px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+
+.prog-io textarea {
+  width: 100%;
+  padding: 9px 11px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  resize: vertical;
+}
+
+.prog-io-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.prog-io-btns button {
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-family: var(--sans);
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.prog-io-btns button:hover { border-color: var(--accent); color: var(--accent); }
+.prog-io-btns button[data-reset] { margin-left: auto; color: var(--red); }
+.prog-io-btns button[data-reset]:hover { border-color: var(--red); color: var(--red); }
+
+.prog-io-msg { min-height: 1.4em; margin: 9px 0 0; font-size: 12px; color: var(--accent); }
+
+@media (max-width: 560px) {
+  .prog-btns button { min-width: 0; padding: 6px 4px; font-size: 11.5px; }
+  .prog-io-btns button[data-reset] { margin-left: 0; }
+}
+
+@media print {
+  .prog-io { display: none; }
 }
 
 /* --- フェーズカード --- */
