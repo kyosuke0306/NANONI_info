@@ -255,12 +255,9 @@
       };
     }
 
-    // 何も入っていない状態。区分は選択肢として1つだけ残す（0個だと作業を足せない）
+    // 何も入っていない状態
     function emptyState() {
-      return {
-        phases: [{ id: 'ph-' + Date.now(), label: '', color: PHASE_COLORS[0].id }],
-        tasks: []
-      };
+      return { phases: [], tasks: [] };
     }
 
     // 色の指定を今の6色に読み替える。茶色の濃淡だった頃の記録もここで拾う。
@@ -285,8 +282,9 @@
       if (!next || typeof next !== 'object') return fromPreset();
 
       if (Array.isArray(next.tasks)) {
-        // 区分を持っていない記録（区分が編集できなかった頃のもの）はひな形の区分を使う
-        var phases = (Array.isArray(next.phases) && next.phases.length)
+        // 区分の項目そのものが無い記録（区分が編集できなかった頃のもの）はひな形の区分を使う。
+        // phases: [] は「全部消した」という意思表示なので、そのまま空で受ける。
+        var phases = Array.isArray(next.phases)
           ? next.phases.filter(function (p) { return p && typeof p === 'object' && p.id; })
                        .map(function (p) {
               return {
@@ -296,8 +294,6 @@
               };
             })
           : fromPreset().phases;
-
-        if (!phases.length) phases = fromPreset().phases;
 
         var known = {};
         phases.forEach(function (p) { known[p.id] = 1; });
@@ -311,8 +307,8 @@
               name: t.name == null ? '' : String(t.name),
               from: t.from == null ? '' : String(t.from),
               to:   t.to   == null ? '' : String(t.to),
-              // 無くなった区分を指している作業は先頭の区分に寄せる
-              phase: known[t.phase] ? t.phase : phases[0].id,
+              // 無くなった区分を指している作業は先頭の区分に寄せる（区分が0個なら区分なし）
+              phase: known[t.phase] ? t.phase : (phases.length ? phases[0].id : ''),
               status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
               at: t.at == null ? '' : String(t.at)
             };
@@ -364,6 +360,7 @@
       '</tr></thead><tbody data-phase-body></tbody></table>' +
       '<div class="l2-actions">' +
         '<button type="button" data-add-phase>区分を足す</button>' +
+        '<button type="button" class="is-danger" data-clear-phases>全て削除する</button>' +
       '</div>';
 
     docEl.querySelector('#schedule').appendChild(panel);
@@ -381,11 +378,13 @@
       io.sync();
     }
 
+    // 区分は0個にもできるので、必ず何か返す
+    var NO_PHASE = { id: '', label: '', color: PHASE_COLORS[0].id };
     function phaseOf(id) {
       for (var i = 0; i < state.phases.length; i++) {
         if (state.phases[i].id === id) return state.phases[i];
       }
-      return state.phases[0];
+      return state.phases[0] || NO_PHASE;
     }
 
     function usedBy(phaseId) {
@@ -404,17 +403,31 @@
 
     /* ---- 表 ---- */
 
+    // 区分が1つでもあるなら、どの区分にも属さない作業は先頭の区分に寄せる。
+    // （区分を全部消したあとに足し直したとき、表の見た目と中身がずれないように）
+    function reconcile() {
+      if (!state.phases.length) return;
+      var known = {};
+      state.phases.forEach(function (p) { known[p.id] = 1; });
+      state.tasks.forEach(function (t) { if (!known[t.phase]) t.phase = state.phases[0].id; });
+    }
+
     function rebuild() {
+      reconcile();
       tbody.innerHTML = state.tasks.length
         ? state.tasks.map(function (t, i) {
             return '<tr data-i="' + i + '">' +
               '<td><input type="text" data-t="name" value="' + esc(t.name) + '" placeholder="作業の名前"></td>' +
               '<td><input type="month" data-t="from" value="' + esc(t.from) + '"></td>' +
               '<td><input type="month" data-t="to" value="' + esc(t.to) + '"></td>' +
-              '<td><select data-t="phase">' + state.phases.map(function (p) {
-                return '<option value="' + esc(p.id) + '"' + (p.id === t.phase ? ' selected' : '') + '>' +
-                       esc(p.label || '（名前なし）') + '</option>';
-              }).join('') + '</select></td>' +
+              '<td><select data-t="phase"' + (state.phases.length ? '' : ' disabled') + '>' +
+                (state.phases.length
+                  ? state.phases.map(function (p) {
+                      return '<option value="' + esc(p.id) + '"' + (p.id === t.phase ? ' selected' : '') + '>' +
+                             esc(p.label || '（名前なし）') + '</option>';
+                    }).join('')
+                  : '<option value="">（区分なし）</option>') +
+              '</select></td>' +
               '<td><select data-t="status">' + STATUSES.map(function (s) {
                 return '<option value="' + s.id + '"' + (s.id === t.status ? ' selected' : '') + '>' +
                        s.label + '</option>';
@@ -424,7 +437,8 @@
           }).join('')
         : '<tr class="l2-none"><td colspan="6">作業がありません。「作業を足す」から入れてください。</td></tr>';
 
-      pbody.innerHTML = state.phases.map(function (p, i) {
+      pbody.innerHTML = state.phases.length
+        ? state.phases.map(function (p, i) {
         var n = usedBy(p.id);
         return '<tr data-i="' + i + '">' +
           '<td><input type="text" data-ph="label" value="' + esc(p.label) + '" placeholder="区分の名前"></td>' +
@@ -436,10 +450,11 @@
             }).join('') +
           '</div></td>' +
           '<td class="ph-count">' + n + '件</td>' +
-          '<td><button type="button" class="l2-del" data-del-phase aria-label="この区分を消す"' +
-            (state.phases.length < 2 ? ' disabled title="区分は1つ以上必要です"' : '') + '>×</button></td>' +
+          '<td><button type="button" class="l2-del" data-del-phase aria-label="この区分を消す">×</button></td>' +
         '</tr>';
-      }).join('');
+          }).join('')
+        : '<tr class="l2-none"><td colspan="4">区分がありません。' +
+          '「区分を足す」から作ると、作業に色を付けられます。</td></tr>';
 
       paint();
     }
@@ -513,9 +528,15 @@
         '</div>';
       }).join('');
 
-      // 使っている区分だけを凡例に出す
+      // 使っている区分だけを凡例に出す。区分が無ければ凡例そのものを出さない。
       var used = {};
       state.tasks.forEach(function (t) { used[t.phase] = 1; });
+      var items = state.phases.filter(function (p) { return used[p.id]; })
+        .map(function (p) {
+          return '<li><span class="sw ph-' + esc(p.color) + '"></span>' +
+                 esc(p.label || '（名前なし）') + '</li>';
+        });
+      var legend = items.length ? '<ul class="viz-legend">' + items.join('') + '</ul>' : '';
 
       host.innerHTML =
         '<figure class="viz">' +
@@ -527,11 +548,7 @@
               }).join('') +
             '</span></div>' + rows +
           '</div>' +
-          '<ul class="viz-legend">' + state.phases.filter(function (p) { return used[p.id]; })
-            .map(function (p) {
-              return '<li><span class="sw ph-' + esc(p.color) + '"></span>' +
-                     esc(p.label || '（名前なし）') + '</li>';
-            }).join('') + '</ul>' +
+          legend +
         '</figure>';
     }
 
@@ -592,25 +609,37 @@
 
       if (btn.hasAttribute('data-add-task')) {
         state.tasks.push({ id: 'task-' + Date.now(), name: '', from: '', to: '',
-                           phase: state.phases[0].id, status: 'todo', at: '' });
+                           phase: state.phases.length ? state.phases[0].id : '', status: 'todo', at: '' });
       } else if (btn.hasAttribute('data-del-task')) {
         state.tasks.splice(+btn.closest('tr').dataset.i, 1);
       } else if (btn.hasAttribute('data-add-phase')) {
         state.phases.push({ id: 'ph-' + Date.now(), label: '', color: freeColor() });
       } else if (btn.hasAttribute('data-del-phase')) {
-        if (state.phases.length < 2) return;
         var gone = state.phases[+btn.closest('tr').dataset.i];
+        if (!gone) return;
         var n = usedBy(gone.id);
         var next = state.phases.filter(function (p) { return p !== gone; })[0];
-        if (n && !confirm('「' + (gone.label || '名前なし') + '」を使っている作業が' + n + '件あります。' +
-                          'それらは「' + (next.label || '名前なし') + '」に変わります。よろしいですか？')) return;
-        state.tasks.forEach(function (t) { if (t.phase === gone.id) t.phase = next.id; });
+        if (n && !confirm('「' + (gone.label || '名前なし') + '」を使っている作業が' + n + '件あります。\n' +
+                          (next ? 'それらは「' + (next.label || '名前なし') + '」に変わります。'
+                                : 'それらは区分なしになります。') +
+                          '\n\nよろしいですか？')) return;
+        state.tasks.forEach(function (t) { if (t.phase === gone.id) t.phase = next ? next.id : ''; });
         state.phases = state.phases.filter(function (p) { return p !== gone; });
       } else if (btn.hasAttribute('data-clear-tasks')) {
         if (!state.tasks.length) return;
         if (!confirm('作業を' + state.tasks.length + '件すべて削除します。進捗も消えます。\n' +
                      '（区分は残ります）\n\nよろしいですか？')) return;
         state.tasks = [];
+      } else if (btn.hasAttribute('data-clear-phases')) {
+        if (!state.phases.length) return;
+        var known = {};
+        state.phases.forEach(function (p) { known[p.id] = 1; });
+        var inUse = state.tasks.filter(function (t) { return known[t.phase]; }).length;
+        if (!confirm('区分を' + state.phases.length + '件すべて削除します。\n' +
+                     (inUse ? '作業' + inUse + '件は区分なしになり、バーは同じ色になります。\n' : '') +
+                     '（作業そのものは消えません）\n\nよろしいですか？')) return;
+        state.phases = [];
+        state.tasks.forEach(function (t) { t.phase = ''; });
       } else return;
 
       persist();

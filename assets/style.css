@@ -1474,7 +1474,7 @@ h3::before {
 
 /* --- 区分の編集 --- */
 
-.phase-table { min-width: 520px; }
+.phase-table { min-width: 620px; }   /* 色見本6つが1行に収まる幅 */
 .ph-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 .ph-swatches { display: flex; flex-wrap: wrap; gap: 5px; }
