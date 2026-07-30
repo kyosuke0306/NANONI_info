@@ -11,6 +11,10 @@
 
   var SESSION_KEY = 'nanoni.unlocked.v1';
 
+  // 通常版と簡易版で同じ payload.js を使い、簡易版は復号後に図だけを残す。
+  // （本文を二重に持たないため）
+  var MODE = document.documentElement.dataset.mode === 'simple' ? 'simple' : 'full';
+
   var gate     = document.getElementById('gate');
   var gateForm = document.getElementById('gate-form');
   var gateInput= document.getElementById('gate-input');
@@ -97,6 +101,7 @@
 
   function render(html) {
     docEl.innerHTML = html;
+    if (MODE === 'simple') simplify();
     stampBuildDate();
     wrapWideTables();
     buildToc();
@@ -104,6 +109,37 @@
     initSearch();
     initToTop();
     initNav();
+  }
+
+  /* ---------------------------------------------------------- 簡易版 */
+
+  // 図（figure.viz）と見出しだけを残し、文章・表・カード類を落とす。
+  function simplify() {
+    var lede = docEl.querySelector('.lede');
+    if (lede) lede.remove();
+
+    Array.prototype.slice.call(docEl.querySelectorAll('section')).forEach(function (sec) {
+      var figures = sec.querySelectorAll(':scope > figure.viz');
+
+      // 図が1つも無いセクションはまるごと落とす
+      if (!figures.length) { sec.remove(); return; }
+
+      var keep = [];
+      var h2 = sec.querySelector(':scope > h2');
+      if (h2) {
+        // 通常版と番号がとびとびになるため、見出しの連番は外す
+        h2.textContent = h2.textContent.replace(/^\s*\d+\.\s*/, '');
+        keep.push(h2);
+      }
+      Array.prototype.forEach.call(figures, function (f) { keep.push(f); });
+
+      Array.prototype.slice.call(sec.children).forEach(function (el) {
+        if (keep.indexOf(el) === -1) el.remove();
+      });
+    });
+
+    // 図に添えた注記も文章なので落とす
+    docEl.querySelectorAll('.viz-note').forEach(function (n) { n.remove(); });
   }
 
   function stampBuildDate() {
@@ -345,10 +381,11 @@
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') close();
-      // "/" で検索欄にフォーカス
-      if (e.key === '/' && document.activeElement !== document.getElementById('search')) {
+      // "/" で検索欄にフォーカス（簡易版には検索欄が無いので存在確認する）
+      var search = document.getElementById('search');
+      if (e.key === '/' && search && document.activeElement !== search) {
         e.preventDefault();
-        document.getElementById('search').focus();
+        search.focus();
       }
     });
 

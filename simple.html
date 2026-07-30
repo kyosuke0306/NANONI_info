@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="ja" data-mode="full">
+<html lang="ja" data-mode="simple">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
 <meta name="referrer" content="no-referrer">
-<title>NANONI / 24CLUB — 関係者限定</title>
+<title>NANONI / 24CLUB — 関係者限定（簡易版）</title>
 
 <!-- ブラウザのタブ用 -->
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
@@ -40,7 +40,7 @@
     </div>
 
     <p class="gate-brand">NANONI</p>
-    <p class="gate-sub">24CLUB — 関係者限定 事業情報</p>
+    <p class="gate-sub">24CLUB — 関係者限定 事業情報（簡易版）</p>
 
     <form id="gate-form" class="gate-form" autocomplete="off">
       <label class="visually-hidden" for="gate-input">パスワード</label>
@@ -63,7 +63,7 @@
 
   <header class="topbar">
     <button id="nav-toggle" type="button" aria-label="目次を開く">☰ 目次</button>
-    <span class="topbar-brand">NANONI / 24CLUB</span>
+    <span class="topbar-brand">NANONI / 24CLUB<span class="topbar-mode">簡易版</span></span>
   </header>
 
   <div class="scrim" id="scrim"></div>
@@ -72,12 +72,7 @@
     <aside class="side" id="side">
       <div class="side-head">
         <p class="side-brand">NANONI</p>
-        <span class="side-tag">関係者限定</span>
-      </div>
-
-      <div class="side-search">
-        <input id="search" type="search" placeholder="キーワードで絞り込み（/）"
-               spellcheck="false" autocomplete="off">
+        <span class="side-tag">関係者限定</span> <span class="side-tag is-mode">簡易版</span>
       </div>
 
       <nav aria-label="目次">
@@ -85,8 +80,8 @@
       </nav>
 
       <div class="mode-switch">
-        <a href="index.html" class="is-current" aria-current="page">通常版</a>
-        <a href="simple.html">簡易版</a>
+        <a href="index.html">通常版</a>
+        <a href="simple.html" class="is-current" aria-current="page">簡易版</a>
       </div>
 
       <div class="side-foot">

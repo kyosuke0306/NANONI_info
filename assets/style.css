@@ -331,6 +331,44 @@ a:hover { border-bottom-color: var(--accent); }
   color: var(--muted);
 }
 
+/* --- 通常版 / 簡易版 の切り替え --- */
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.mode-switch a {
+  padding: 6px 4px;
+  border-radius: 6px;
+  border-bottom: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-2);
+  transition: background .13s, color .13s;
+}
+.mode-switch a:hover { background: var(--accent-bg); color: var(--accent); }
+
+.mode-switch a.is-current {
+  background: #2f2a22;
+  color: #fff;
+  font-weight: 700;
+}
+@media (prefers-color-scheme: dark) {
+  .mode-switch a.is-current { background: var(--accent); color: #1a190f; }
+}
+
+.mode-switch a.is-current:hover { background: #2f2a22; color: #fff; }
+@media (prefers-color-scheme: dark) {
+  .mode-switch a.is-current:hover { background: var(--accent); color: #1a190f; }
+}
+
 .side-foot {
   display: flex;
   gap: 8px;
@@ -377,6 +415,18 @@ a:hover { border-bottom-color: var(--accent); }
 }
 
 .topbar-brand { font-size: 13.5px; font-weight: 700; letter-spacing: .14em; }
+
+.topbar-mode {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 10.5px;
+  letter-spacing: .06em;
+}
+
+.side-tag.is-mode { background: var(--accent-bg); color: var(--accent); }
 
 .topbar button {
   padding: 7px 12px;
