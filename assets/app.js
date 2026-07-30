@@ -348,7 +348,7 @@
       '</tr></thead><tbody data-prog-body></tbody></table>' +
       '<div class="l2-actions">' +
         '<button type="button" data-add-task>作業を足す</button>' +
-        '<button type="button" data-restore>ひな形に戻す</button>' +
+        '<button type="button" class="is-danger" data-clear-tasks>全て削除する</button>' +
       '</div>' +
 
       '<h3 id="schedule-phases">区分（バーの色）</h3>' +
@@ -417,7 +417,7 @@
               '<td><button type="button" class="l2-del" data-del-task aria-label="この作業を消す">×</button></td>' +
             '</tr>';
           }).join('')
-        : '<tr class="l2-none"><td colspan="6">作業がありません。「作業を足す」か「ひな形に戻す」を押してください。</td></tr>';
+        : '<tr class="l2-none"><td colspan="6">作業がありません。「作業を足す」から入れてください。</td></tr>';
 
       pbody.innerHTML = state.phases.map(function (p, i) {
         var n = usedBy(p.id);
@@ -601,9 +601,11 @@
                           'それらは「' + (next.label || '名前なし') + '」に変わります。よろしいですか？')) return;
         state.tasks.forEach(function (t) { if (t.phase === gone.id) t.phase = next.id; });
         state.phases = state.phases.filter(function (p) { return p !== gone; });
-      } else if (btn.hasAttribute('data-restore')) {
-        if (!confirm('予定・区分・進捗をひな形に戻します。今の内容は消えます。よろしいですか？')) return;
-        state = fromPreset();
+      } else if (btn.hasAttribute('data-clear-tasks')) {
+        if (!state.tasks.length) return;
+        if (!confirm('作業を' + state.tasks.length + '件すべて削除します。進捗も消えます。\n' +
+                     '（区分は残ります）\n\nよろしいですか？')) return;
+        state.tasks = [];
       } else return;
 
       persist();
