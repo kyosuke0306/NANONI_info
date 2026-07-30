@@ -1388,10 +1388,18 @@ h3::before {
 .gt-track {
   position: relative;
   height: 20px;
-  /* 3ヶ月ごとの目盛り。データではないので極力後退させる */
+  /* 目盛り。間隔は表示している月数から .gantt に --gt-div で渡す。
+     データではないので極力後退させる */
   background-image: repeating-linear-gradient(
-    to right, var(--line) 0 1px, transparent 1px calc(100% / 4)
+    to right, var(--line) 0 1px, transparent 1px var(--gt-div, 25%)
   );
+}
+
+/* 年月が入っていない作業 */
+.gt-blank {
+  font-size: 10.5px;
+  line-height: 20px;
+  color: var(--muted);
 }
 
 .gt-bar {
@@ -1425,6 +1433,20 @@ h3::before {
 @media (prefers-color-scheme: dark) {
   .gt-bar > span.inside { color: #17160f; }
 }
+
+/* 右端に寄ったバーは、ラベルを右に置くと枠からはみ出すので左側に出す */
+.gt-bar > span.before {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 8px;
+}
+
+/* 凡例の色見本（区分は本文側の data-phase-def で決まる） */
+.viz-legend .sw-p1  { background: var(--v-c1); }
+.viz-legend .sw-p2  { background: var(--v-c2); }
+.viz-legend .sw-p3  { background: var(--v-c3); }
+.viz-legend .sw-rev { background: var(--v-rev); }
 
 /* --- 進捗の記録 --- */
 
@@ -1593,10 +1615,9 @@ h3::before {
 .l2-field input:focus { outline: 0; border-bottom-color: var(--accent); }
 .l2-field em { font-style: normal; font-size: 12px; color: var(--muted); }
 
-/* --- 表のなかの入力欄 --- */
+/* --- 表のなかの入力欄（第2ロット・スケジュール共通） --- */
 
-.l2-costs input, .l2-costs select,
-.l2-stock input, .l2-stock select {
+.tbl-edit input, .tbl-edit select {
   width: 100%;
   min-width: 0;
   padding: 6px 8px;
@@ -1608,24 +1629,25 @@ h3::before {
   border: 1px solid var(--line);
   border-radius: 6px;
 }
-.l2-costs input[type="number"], .l2-stock input[type="number"] {
+.tbl-edit input[type="number"] {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.l2-costs input:focus, .l2-costs select:focus,
-.l2-stock input:focus, .l2-stock select:focus {
+.tbl-edit input[type="month"] { font-family: var(--mono); font-size: 12px; }
+.tbl-edit input:focus, .tbl-edit select:focus {
   outline: 0;
   border-color: var(--accent);
 }
 /* 幅が足りないと項目名が1文字ずつ折り返してしまうので、
    狭い画面では縮めずに .table-scroll で横スクロールさせる */
-.l2-costs { min-width: 560px; }
-.l2-stock { min-width: 400px; }
+.l2-costs   { min-width: 560px; }
+.l2-stock   { min-width: 400px; }
+.prog-table { min-width: 740px; }
 
-.l2-costs td, .l2-stock td { vertical-align: middle; }
+.tbl-edit td { vertical-align: middle; }
 /* 入力欄が入るので、1列目だけ太字にする既定を打ち消す */
-.l2-costs tbody td:first-child, .l2-stock tbody td:first-child { font-weight: 400; }
+.tbl-edit tbody td:first-child { font-weight: 400; }
 .l2-costs tfoot td { font-weight: 700; }
 
 .l2-none td { color: var(--muted); font-size: 12.5px; }

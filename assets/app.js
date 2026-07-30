@@ -24,7 +24,8 @@
   // 自分の章だけを表示する専用ページ（data-page の値と一致させる）
   var SOLO_PAGES = { schedule: 1, lot2: 1, chat: 1 };
 
-  var PROGRESS_KEY = 'nanoni.progress.v1';
+  var PROGRESS_KEY = 'nanoni.progress.v1';   // 旧・進捗だけの記録（読み込んで引き継ぐ）
+  var SCHEDULE_KEY = 'nanoni.schedule.v1';  // 予定＋進捗
   var LOT2_KEY     = 'nanoni.lot2.v1';
   var APIKEY_KEY   = 'nanoni.apikey.v1';
 
@@ -135,7 +136,7 @@
     if (MODE === 'chat') CONTEXT_TEXT = htmlToText(html);
     routePages();
     if (MODE === 'simple')   simplify();
-    if (MODE === 'schedule') initProgress();
+    if (MODE === 'schedule') initSchedule();
     if (MODE === 'lot2')     initLot2();
     if (MODE === 'chat')     initChat();
     stampBuildDate();
@@ -160,7 +161,7 @@
     }
   }
 
-  /* ------------------------------------------------------- 進捗の記録 */
+  /* --------------------------------------------------- 予定と進捗の記録 */
 
   // 記録はどのページも同じ形で扱う（localStorage に JSON で1件）
   function readStore(key, fallback) {
@@ -175,106 +176,280 @@
     catch (e) { return false; }
   }
 
-  function loadProgress() { return readStore(PROGRESS_KEY, {}); }
-  function saveProgress(data) { return writeStore(PROGRESS_KEY, data); }
-
   function today() {
     var d = new Date();
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
   }
 
-  function initProgress() {
-    var gantt = docEl.querySelector('[data-gantt]');
-    if (!gantt) return;
+  // 数字も作業名も app.js には書かない。ひな形は本文側の data-schedule-preset から読む。
+  function readSchedulePreset() {
+    var el = docEl.querySelector('[data-schedule-preset]');
+    if (!el) return null;
+    return {
+      phases: Array.prototype.map.call(el.querySelectorAll('[data-phase-def]'), function (s) {
+        return { id: s.dataset.phaseDef, label: s.dataset.label };
+      }),
+      tasks: Array.prototype.map.call(el.querySelectorAll('[data-task]'), function (s) {
+        return {
+          id: s.dataset.task, name: s.dataset.name,
+          from: s.dataset.from, to: s.dataset.to,
+          phase: s.dataset.phase, status: 'todo', at: ''
+        };
+      })
+    };
+  }
 
-    var rows = Array.prototype.slice.call(gantt.querySelectorAll('.gt-row[data-task]'));
-    if (!rows.length) return;
+  // '2026-08' ←→ 通し月番号
+  function mIndex(ym) {
+    var m = /^(\d{4})-(\d{1,2})$/.exec(String(ym == null ? '' : ym));
+    if (!m) return null;
+    var mo = +m[2];
+    if (mo < 1 || mo > 12) return null;
+    return (+m[1]) * 12 + (mo - 1);
+  }
 
-    var state = loadProgress();
+  function mLabel(idx, withYear) {
+    var y = Math.floor(idx / 12), mo = idx % 12 + 1;
+    return (withYear ? String(y).slice(2) + '年' : '') + mo + '月';
+  }
+
+  function initSchedule() {
+    var host = docEl.querySelector('[data-schedule-chart]');
+    var preset = readSchedulePreset();
+    if (!host || !preset) return;
+
+    function fromPreset() {
+      return { tasks: preset.tasks.map(function (t) {
+        return { id: t.id, name: t.name, from: t.from, to: t.to, phase: t.phase, status: 'todo', at: '' };
+      }) };
+    }
+
+    // 状態だけを持っていた古い記録（進捗のみ）を引き継ぐ
+    function migrate(base) {
+      var old = readStore(PROGRESS_KEY, null);
+      if (!old) return base;
+      base.tasks.forEach(function (t) {
+        var rec = old[t.id];
+        if (rec && rec.status) { t.status = rec.status; t.at = rec.at || ''; }
+      });
+      return base;
+    }
+
+    // 受け取った JSON を整える。作業だけの古い形式も読めるようにしておく
+    function normalize(next) {
+      if (!next || typeof next !== 'object') return fromPreset();
+
+      if (Array.isArray(next.tasks)) {
+        return { tasks: next.tasks.filter(function (t) { return t && typeof t === 'object'; })
+                                  .map(function (t, i) {
+          return {
+            id: t.id || ('t' + i + '-' + Date.now()),
+            name: t.name == null ? '' : String(t.name),
+            from: t.from == null ? '' : String(t.from),
+            to:   t.to   == null ? '' : String(t.to),
+            phase: t.phase || preset.phases[0].id,
+            status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
+            at: t.at == null ? '' : String(t.at)
+          };
+        }) };
+      }
+
+      // 旧形式 { taskId: { status, at } } … 進捗だけを今の予定に重ねる
+      var base = fromPreset();
+      base.tasks.forEach(function (t) {
+        var rec = next[t.id];
+        if (rec && rec.status) { t.status = rec.status; t.at = rec.at || ''; }
+      });
+      return base;
+    }
+
+    var stored = readStore(SCHEDULE_KEY, null);
+    var state = stored ? normalize(stored) : migrate(fromPreset());
 
     var panel = document.createElement('section');
     panel.id = 'progress';
     panel.innerHTML =
-      '<h2>進捗の記録</h2>' +
+      '<h2>予定と進捗の記録</h2>' +
       '<div class="callout callout-note">' +
         '<p class="callout-title">この端末にだけ保存されます</p>' +
-        '<p>記録はブラウザの中に保存されるため、<strong>ほかの人の画面には出ません</strong>。' +
-        '共有したいときは下の「記録を書き出す」でコピーして渡し、相手が「読み込む」に貼り付けてください。</p>' +
+        '<p>書き換えた予定と進捗はブラウザの中に保存されるため、<strong>ほかの人の画面には出ません</strong>。' +
+        '共有したいときは下の「記録の書き出し / 読み込み」でコピーして渡し、相手が「読み込む」に貼り付けてください。</p>' +
       '</div>' +
       '<div class="prog-summary">' +
         '<p class="prog-count"><b data-done>0</b> / <span data-total>0</span> 完了</p>' +
         '<div class="prog-meter"><span data-meter style="width:0%"></span></div>' +
       '</div>' +
-      '<table class="tbl prog-table"><thead><tr>' +
-        '<th>作業</th><th style="width:44%">状態</th><th style="width:16%">更新日</th>' +
-      '</tr></thead><tbody data-prog-body></tbody></table>';
+      '<table class="tbl tbl-edit prog-table"><thead><tr>' +
+        '<th style="width:28%">作業</th><th style="width:16%">開始</th><th style="width:16%">終了</th>' +
+        '<th style="width:22%">区分</th><th style="width:16%">状態</th>' +
+        '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
+      '</tr></thead><tbody data-prog-body></tbody></table>' +
+      '<div class="l2-actions">' +
+        '<button type="button" data-add-task>作業を足す</button>' +
+        '<button type="button" data-restore>ひな形に戻す</button>' +
+      '</div>';
 
     docEl.querySelector('#schedule').appendChild(panel);
 
     var io = ioPanel(function () { return state; },
-                     function (next) { state = next; saveProgress(state); paint(); },
-                     function () { return {}; });
-    io.querySelector('[data-reset]').textContent = 'すべて未着手に戻す';
+                     function (next) { state = normalize(next); persist(); rebuild(); },
+                     fromPreset);
+    io.querySelector('[data-reset]').textContent = 'ひな形に戻す';
     panel.appendChild(io);
 
     var tbody = panel.querySelector('[data-prog-body]');
 
-    rows.forEach(function (row) {
-      var id = row.dataset.task;
-      var name = row.querySelector('.gt-name').textContent.trim();
-      var bar = row.querySelector('.gt-bar > span');
-      var when = bar ? bar.textContent.trim() : '';
-
-      var tr = document.createElement('tr');
-      tr.dataset.task = id;
-      tr.innerHTML =
-        '<td>' + name + (when ? '<span class="sub"> ／ ' + when + '</span>' : '') + '</td>' +
-        '<td><div class="prog-btns" role="group" aria-label="' + name + ' の状態">' +
-          STATUSES.map(function (s) {
-            return '<button type="button" data-set="' + s.id + '">' + s.label + '</button>';
-          }).join('') +
-        '</div></td>' +
-        '<td class="prog-at"></td>';
-      tbody.appendChild(tr);
-    });
-
-    // 状態の反映
-    function paint() {
-      var done = 0;
-      rows.forEach(function (row) {
-        var id = row.dataset.task;
-        var rec = state[id] || {};
-        var st = rec.status || 'todo';
-        if (st === 'done') done++;
-
-        row.classList.remove('is-todo', 'is-doing', 'is-done');
-        row.classList.add('is-' + st);
-
-        var tr = tbody.querySelector('tr[data-task="' + id + '"]');
-        tr.querySelectorAll('[data-set]').forEach(function (b) {
-          b.classList.toggle('is-on', b.dataset.set === st);
-        });
-        tr.querySelector('.prog-at').textContent = st === 'todo' ? '' : (rec.at || '');
-      });
-
-      panel.querySelector('[data-done]').textContent = done;
-      panel.querySelector('[data-total]').textContent = rows.length;
-      panel.querySelector('[data-meter]').style.width = (done / rows.length * 100) + '%';
+    function persist() {
+      writeStore(SCHEDULE_KEY, state);
       io.sync();
     }
 
-    tbody.addEventListener('click', function (e) {
-      var btn = e.target.closest('[data-set]');
-      if (!btn) return;
-      var id = btn.closest('tr').dataset.task;
-      var st = btn.dataset.set;
-      if (st === 'todo') delete state[id];
-      else state[id] = { status: st, at: today() };
-      saveProgress(state);
+    /* ---- 表 ---- */
+
+    function rebuild() {
+      tbody.innerHTML = state.tasks.length
+        ? state.tasks.map(function (t, i) {
+            return '<tr data-i="' + i + '">' +
+              '<td><input type="text" data-t="name" value="' + esc(t.name) + '" placeholder="作業の名前"></td>' +
+              '<td><input type="month" data-t="from" value="' + esc(t.from) + '"></td>' +
+              '<td><input type="month" data-t="to" value="' + esc(t.to) + '"></td>' +
+              '<td><select data-t="phase">' + preset.phases.map(function (p) {
+                return '<option value="' + p.id + '"' + (p.id === t.phase ? ' selected' : '') + '>' +
+                       esc(p.label) + '</option>';
+              }).join('') + '</select></td>' +
+              '<td><select data-t="status">' + STATUSES.map(function (s) {
+                return '<option value="' + s.id + '"' + (s.id === t.status ? ' selected' : '') + '>' +
+                       s.label + '</option>';
+              }).join('') + '</select></td>' +
+              '<td><button type="button" class="l2-del" data-del-task aria-label="この作業を消す">×</button></td>' +
+            '</tr>';
+          }).join('')
+        : '<tr class="l2-none"><td colspan="6">作業がありません。「作業を足す」か「ひな形に戻す」を押してください。</td></tr>';
       paint();
+    }
+
+    function paint() {
+      var done = state.tasks.filter(function (t) { return t.status === 'done'; }).length;
+      var total = state.tasks.length;
+      panel.querySelector('[data-done]').textContent = done;
+      panel.querySelector('[data-total]').textContent = total;
+      panel.querySelector('[data-meter]').style.width = (total ? done / total * 100 : 0) + '%';
+      renderGantt();
+      io.sync();
+    }
+
+    /* ---- ガント図 ---- */
+
+    function renderGantt() {
+      var ok = state.tasks.filter(function (t) {
+        return mIndex(t.from) !== null && mIndex(t.to) !== null && mIndex(t.to) >= mIndex(t.from);
+      });
+
+      if (!ok.length) {
+        host.innerHTML = '<figure class="viz"><p class="l2-empty">' +
+          '下の表に作業と「開始」「終了」の年月を入れると、ここにガント図が出ます。' +
+          '（終了は開始と同じ月でもかまいません）</p></figure>';
+        return;
+      }
+
+      var min = Math.min.apply(null, ok.map(function (t) { return mIndex(t.from); }));
+      var max = Math.max.apply(null, ok.map(function (t) { return mIndex(t.to); }));
+      var span = max - min + 1;
+      var step = Math.max(1, Math.ceil(span / 4));
+
+      // 目盛り。年が変わったときだけ「26年」を付ける
+      var ticks = [], lastYear = null;
+      function tick(i) {
+        var idx = min + i;
+        var year = Math.floor(idx / 12);
+        ticks.push({ at: i / span * 100, text: mLabel(idx, year !== lastYear) });
+        lastYear = year;
+      }
+      for (var i = 0; i <= span; i += step) tick(i);
+      // 右端に必ず目盛りを置く（最後の1つは右揃えで描くため、100%でないとずれる）
+      if (ticks[ticks.length - 1].at < 100) tick(span);
+
+      var rows = state.tasks.map(function (t) {
+        var a = mIndex(t.from), b = mIndex(t.to);
+        if (a === null || b === null || b < a) {
+          return '<div class="gt-row is-' + t.status + '">' +
+                 '<span class="gt-name">' + esc(t.name || '（名前なし）') + '</span>' +
+                 '<span class="gt-track"><span class="gt-blank">年月を入れてください</span></span></div>';
+        }
+        var left  = (a - min) / span * 100;
+        var width = (b - a + 1) / span * 100;
+        var label = a === b ? mLabel(a, true) : mLabel(a, true) + '〜' + mLabel(b, Math.floor(a / 12) !== Math.floor(b / 12));
+
+        // 幅が足りないラベルはバーの外へ。右端に寄るものは左側に出す
+        var place = width >= 30 ? ' class="inside"' : (left + width > 62 ? ' class="before"' : '');
+
+        return '<div class="gt-row is-' + t.status + '">' +
+          '<span class="gt-name">' + esc(t.name || '（名前なし）') + '</span>' +
+          '<span class="gt-track"><span class="gt-bar ' + esc(t.phase) + '" ' +
+            'style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%" ' +
+            'title="' + esc(t.name) + ' ' + label + '"><span' + place + '>' + label + '</span></span></span>' +
+        '</div>';
+      }).join('');
+
+      // 使っている区分だけを凡例に出す
+      var used = {};
+      state.tasks.forEach(function (t) { used[t.phase] = 1; });
+
+      host.innerHTML =
+        '<figure class="viz">' +
+          '<p class="viz-title">' + mLabel(min, true) + ' から ' + mLabel(max, true) + ' まで</p>' +
+          '<div class="gantt" style="--gt-div:' + (step / span * 100).toFixed(3) + '%">' +
+            '<div class="gt-head"><span></span><span class="gt-scale">' +
+              ticks.map(function (t) {
+                return '<span style="left:' + t.at.toFixed(2) + '%">' + t.text + '</span>';
+              }).join('') +
+            '</span></div>' + rows +
+          '</div>' +
+          '<ul class="viz-legend">' + preset.phases.filter(function (p) { return used[p.id]; })
+            .map(function (p) {
+              return '<li><span class="sw sw-' + p.id + '"></span>' + esc(p.label) + '</li>';
+            }).join('') + '</ul>' +
+        '</figure>';
+    }
+
+    /* ---- 入力の受け取り ---- */
+
+    function applyInput(el) {
+      if (!el.dataset.t) return;
+      var t = state.tasks[+el.closest('tr').dataset.i];
+      if (!t) return;
+      if (el.dataset.t === 'status' && el.value !== t.status) {
+        t.at = el.value === 'todo' ? '' : today();
+      }
+      t[el.dataset.t] = el.value;
+      persist();
+      paint();
+    }
+
+    panel.addEventListener('input', function (e) { applyInput(e.target); });
+    panel.addEventListener('change', function (e) {
+      if (e.target.tagName === 'SELECT' || e.target.type === 'month') applyInput(e.target);
     });
 
-    paint();
+    panel.addEventListener('click', function (e) {
+      var btn = e.target.closest('button');
+      if (!btn) return;
+
+      if (btn.hasAttribute('data-add-task')) {
+        state.tasks.push({ id: 'task-' + Date.now(), name: '', from: '', to: '',
+                           phase: preset.phases[0].id, status: 'todo', at: '' });
+      } else if (btn.hasAttribute('data-del-task')) {
+        state.tasks.splice(+btn.closest('tr').dataset.i, 1);
+      } else if (btn.hasAttribute('data-restore')) {
+        if (!confirm('予定と進捗をひな形に戻します。今の内容は消えます。よろしいですか？')) return;
+        state = fromPreset();
+      } else return;
+
+      persist();
+      rebuild();
+    });
+
+    rebuild();
   }
 
   /* ----------------------------------------------------- 小さな道具 */
@@ -396,7 +571,7 @@
       '</div>' +
 
       '<h3 id="lot2-cost">2. かかるお金</h3>' +
-      '<table class="tbl l2-costs"><thead><tr>' +
+      '<table class="tbl tbl-edit l2-costs"><thead><tr>' +
         '<th style="width:28%">項目</th><th style="width:20%">単位</th><th style="width:18%">単価（円）</th>' +
         '<th style="width:17%">合計</th><th style="width:15%">1缶あたり</th><th style="width:1%"><span class="visually-hidden">消す</span></th>' +
       '</tr></thead><tbody data-cost-body></tbody>' +
@@ -415,7 +590,7 @@
       '<figure class="viz"><p class="viz-title">売る値段と、かかるお金</p><div data-unit-chart></div></figure>' +
 
       '<h3 id="lot2-stock">4. 在庫の行き先</h3>' +
-      '<table class="tbl l2-stock"><thead><tr>' +
+      '<table class="tbl tbl-edit l2-stock"><thead><tr>' +
         '<th style="width:44%">出荷先</th><th style="width:26%">種別</th><th style="width:22%">本数</th>' +
         '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
       '</tr></thead><tbody data-stock-body></tbody></table>' +
