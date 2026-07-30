@@ -35,6 +35,17 @@
     { id: 'done',  label: '完了' }
   ];
 
+  // 区分に選べる色。色の見分けやすさを確かめた組み合わせだけを出す
+  // （赤と茶は暗い画面で見分けにくいので、赤は入れていない）
+  var PHASE_COLORS = [
+    { id: 'c1',  label: '濃い茶' },
+    { id: 'c2',  label: '茶' },
+    { id: 'c3',  label: '薄い茶' },
+    { id: 'c4',  label: 'ごく薄い茶' },
+    { id: 'rev', label: '青' },
+    { id: 'unk', label: '灰' }
+  ];
+
   // 費用の単位。lot2 ページの計算はすべてここを見る
   var UNITS = [
     { id: 'can',  label: '1缶ごと' },
@@ -187,7 +198,7 @@
     if (!el) return null;
     return {
       phases: Array.prototype.map.call(el.querySelectorAll('[data-phase-def]'), function (s) {
-        return { id: s.dataset.phaseDef, label: s.dataset.label };
+        return { id: s.dataset.phaseDef, label: s.dataset.label, color: s.dataset.color };
       }),
       tasks: Array.prototype.map.call(el.querySelectorAll('[data-task]'), function (s) {
         return {
@@ -219,9 +230,18 @@
     if (!host || !preset) return;
 
     function fromPreset() {
-      return { tasks: preset.tasks.map(function (t) {
-        return { id: t.id, name: t.name, from: t.from, to: t.to, phase: t.phase, status: 'todo', at: '' };
-      }) };
+      return {
+        phases: preset.phases.map(function (p) {
+          return { id: p.id, label: p.label, color: p.color };
+        }),
+        tasks: preset.tasks.map(function (t) {
+          return { id: t.id, name: t.name, from: t.from, to: t.to, phase: t.phase, status: 'todo', at: '' };
+        })
+      };
+    }
+
+    function isColor(id) {
+      return PHASE_COLORS.some(function (c) { return c.id === id; });
     }
 
     // 状態だけを持っていた古い記録（進捗のみ）を引き継ぐ
@@ -240,18 +260,39 @@
       if (!next || typeof next !== 'object') return fromPreset();
 
       if (Array.isArray(next.tasks)) {
-        return { tasks: next.tasks.filter(function (t) { return t && typeof t === 'object'; })
-                                  .map(function (t, i) {
-          return {
-            id: t.id || ('t' + i + '-' + Date.now()),
-            name: t.name == null ? '' : String(t.name),
-            from: t.from == null ? '' : String(t.from),
-            to:   t.to   == null ? '' : String(t.to),
-            phase: t.phase || preset.phases[0].id,
-            status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
-            at: t.at == null ? '' : String(t.at)
-          };
-        }) };
+        // 区分を持っていない記録（区分が編集できなかった頃のもの）はひな形の区分を使う
+        var phases = (Array.isArray(next.phases) && next.phases.length)
+          ? next.phases.filter(function (p) { return p && typeof p === 'object' && p.id; })
+                       .map(function (p) {
+              return {
+                id: String(p.id),
+                label: p.label == null ? '' : String(p.label),
+                color: isColor(p.color) ? p.color : PHASE_COLORS[0].id
+              };
+            })
+          : fromPreset().phases;
+
+        if (!phases.length) phases = fromPreset().phases;
+
+        var known = {};
+        phases.forEach(function (p) { known[p.id] = 1; });
+
+        return {
+          phases: phases,
+          tasks: next.tasks.filter(function (t) { return t && typeof t === 'object'; })
+                           .map(function (t, i) {
+            return {
+              id: t.id || ('t' + i + '-' + Date.now()),
+              name: t.name == null ? '' : String(t.name),
+              from: t.from == null ? '' : String(t.from),
+              to:   t.to   == null ? '' : String(t.to),
+              // 無くなった区分を指している作業は先頭の区分に寄せる
+              phase: known[t.phase] ? t.phase : phases[0].id,
+              status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
+              at: t.at == null ? '' : String(t.at)
+            };
+          })
+        };
       }
 
       // 旧形式 { taskId: { status, at } } … 進捗だけを今の予定に重ねる
@@ -279,6 +320,7 @@
         '<p class="prog-count"><b data-done>0</b> / <span data-total>0</span> 完了</p>' +
         '<div class="prog-meter"><span data-meter style="width:0%"></span></div>' +
       '</div>' +
+      '<h3 id="schedule-tasks">作業</h3>' +
       '<table class="tbl tbl-edit prog-table"><thead><tr>' +
         '<th style="width:28%">作業</th><th style="width:16%">開始</th><th style="width:16%">終了</th>' +
         '<th style="width:22%">区分</th><th style="width:16%">状態</th>' +
@@ -287,6 +329,16 @@
       '<div class="l2-actions">' +
         '<button type="button" data-add-task>作業を足す</button>' +
         '<button type="button" data-restore>ひな形に戻す</button>' +
+      '</div>' +
+
+      '<h3 id="schedule-phases">区分（バーの色）</h3>' +
+      '<p class="viz-note">作業のまとまりに名前と色を付けます。図の凡例もここから作られます。</p>' +
+      '<table class="tbl tbl-edit phase-table"><thead><tr>' +
+        '<th style="width:36%">名前</th><th style="width:48%">色</th><th style="width:15%">使っている作業</th>' +
+        '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
+      '</tr></thead><tbody data-phase-body></tbody></table>' +
+      '<div class="l2-actions">' +
+        '<button type="button" data-add-phase>区分を足す</button>' +
       '</div>';
 
     docEl.querySelector('#schedule').appendChild(panel);
@@ -298,10 +350,32 @@
     panel.appendChild(io);
 
     var tbody = panel.querySelector('[data-prog-body]');
+    var pbody = panel.querySelector('[data-phase-body]');
 
     function persist() {
       writeStore(SCHEDULE_KEY, state);
       io.sync();
+    }
+
+    function phaseOf(id) {
+      for (var i = 0; i < state.phases.length; i++) {
+        if (state.phases[i].id === id) return state.phases[i];
+      }
+      return state.phases[0];
+    }
+
+    function usedBy(phaseId) {
+      return state.tasks.filter(function (t) { return t.phase === phaseId; }).length;
+    }
+
+    // 区分を足すときは、まだ使っていない色から選ぶ（全部使っていたら順に回す）
+    function freeColor() {
+      var taken = {};
+      state.phases.forEach(function (p) { taken[p.color] = 1; });
+      for (var i = 0; i < PHASE_COLORS.length; i++) {
+        if (!taken[PHASE_COLORS[i].id]) return PHASE_COLORS[i].id;
+      }
+      return PHASE_COLORS[state.phases.length % PHASE_COLORS.length].id;
     }
 
     /* ---- 表 ---- */
@@ -313,9 +387,9 @@
               '<td><input type="text" data-t="name" value="' + esc(t.name) + '" placeholder="作業の名前"></td>' +
               '<td><input type="month" data-t="from" value="' + esc(t.from) + '"></td>' +
               '<td><input type="month" data-t="to" value="' + esc(t.to) + '"></td>' +
-              '<td><select data-t="phase">' + preset.phases.map(function (p) {
-                return '<option value="' + p.id + '"' + (p.id === t.phase ? ' selected' : '') + '>' +
-                       esc(p.label) + '</option>';
+              '<td><select data-t="phase">' + state.phases.map(function (p) {
+                return '<option value="' + esc(p.id) + '"' + (p.id === t.phase ? ' selected' : '') + '>' +
+                       esc(p.label || '（名前なし）') + '</option>';
               }).join('') + '</select></td>' +
               '<td><select data-t="status">' + STATUSES.map(function (s) {
                 return '<option value="' + s.id + '"' + (s.id === t.status ? ' selected' : '') + '>' +
@@ -325,6 +399,24 @@
             '</tr>';
           }).join('')
         : '<tr class="l2-none"><td colspan="6">作業がありません。「作業を足す」か「ひな形に戻す」を押してください。</td></tr>';
+
+      pbody.innerHTML = state.phases.map(function (p, i) {
+        var n = usedBy(p.id);
+        return '<tr data-i="' + i + '">' +
+          '<td><input type="text" data-ph="label" value="' + esc(p.label) + '" placeholder="区分の名前"></td>' +
+          '<td><div class="ph-swatches" role="group" aria-label="' + esc(p.label) + ' の色">' +
+            PHASE_COLORS.map(function (c) {
+              return '<button type="button" class="ph-sw ph-' + c.id + (c.id === p.color ? ' is-on' : '') +
+                     '" data-color="' + c.id + '" title="' + c.label + '" aria-label="' + c.label + '"' +
+                     (c.id === p.color ? ' aria-pressed="true"' : ' aria-pressed="false"') + '></button>';
+            }).join('') +
+          '</div></td>' +
+          '<td class="ph-count">' + n + '件</td>' +
+          '<td><button type="button" class="l2-del" data-del-phase aria-label="この区分を消す"' +
+            (state.phases.length < 2 ? ' disabled title="区分は1つ以上必要です"' : '') + '>×</button></td>' +
+        '</tr>';
+      }).join('');
+
       paint();
     }
 
@@ -334,6 +426,12 @@
       panel.querySelector('[data-done]').textContent = done;
       panel.querySelector('[data-total]').textContent = total;
       panel.querySelector('[data-meter]').style.width = (total ? done / total * 100 : 0) + '%';
+
+      pbody.querySelectorAll('tr').forEach(function (tr) {
+        var p = state.phases[+tr.dataset.i];
+        if (p) tr.querySelector('.ph-count').textContent = usedBy(p.id) + '件';
+      });
+
       renderGantt();
       io.sync();
     }
@@ -385,7 +483,7 @@
 
         return '<div class="gt-row is-' + t.status + '">' +
           '<span class="gt-name">' + esc(t.name || '（名前なし）') + '</span>' +
-          '<span class="gt-track"><span class="gt-bar ' + esc(t.phase) + '" ' +
+          '<span class="gt-track"><span class="gt-bar ph-' + esc(phaseOf(t.phase).color) + '" ' +
             'style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%" ' +
             'title="' + esc(t.name) + ' ' + label + '"><span' + place + '>' + label + '</span></span></span>' +
         '</div>';
@@ -405,9 +503,10 @@
               }).join('') +
             '</span></div>' + rows +
           '</div>' +
-          '<ul class="viz-legend">' + preset.phases.filter(function (p) { return used[p.id]; })
+          '<ul class="viz-legend">' + state.phases.filter(function (p) { return used[p.id]; })
             .map(function (p) {
-              return '<li><span class="sw sw-' + p.id + '"></span>' + esc(p.label) + '</li>';
+              return '<li><span class="sw ph-' + esc(p.color) + '"></span>' +
+                     esc(p.label || '（名前なし）') + '</li>';
             }).join('') + '</ul>' +
         '</figure>';
     }
@@ -415,15 +514,32 @@
     /* ---- 入力の受け取り ---- */
 
     function applyInput(el) {
-      if (!el.dataset.t) return;
-      var t = state.tasks[+el.closest('tr').dataset.i];
-      if (!t) return;
-      if (el.dataset.t === 'status' && el.value !== t.status) {
-        t.at = el.value === 'todo' ? '' : today();
+      var row = el.closest('tr');
+      if (!row) return;
+
+      if (el.dataset.t) {
+        var t = state.tasks[+row.dataset.i];
+        if (!t) return;
+        if (el.dataset.t === 'status' && el.value !== t.status) {
+          t.at = el.value === 'todo' ? '' : today();
+        }
+        t[el.dataset.t] = el.value;
+        persist();
+        paint();
+        return;
       }
-      t[el.dataset.t] = el.value;
-      persist();
-      paint();
+
+      if (el.dataset.ph) {
+        var p = state.phases[+row.dataset.i];
+        if (!p) return;
+        p[el.dataset.ph] = el.value;
+        persist();
+        // 区分名は作業側の選択肢にも出るので、そちらも書き換える
+        tbody.querySelectorAll('[data-t="phase"] option[value="' + p.id + '"]').forEach(function (o) {
+          o.textContent = p.label || '（名前なし）';
+        });
+        paint();
+      }
     }
 
     panel.addEventListener('input', function (e) { applyInput(e.target); });
@@ -435,13 +551,39 @@
       var btn = e.target.closest('button');
       if (!btn) return;
 
+      // 色見本は行を作り直さず、押した見本の印だけを付け替える
+      if (btn.classList.contains('ph-sw')) {
+        var ph = state.phases[+btn.closest('tr').dataset.i];
+        if (!ph) return;
+        ph.color = btn.dataset.color;
+        btn.parentElement.querySelectorAll('.ph-sw').forEach(function (b) {
+          var on = b === btn;
+          b.classList.toggle('is-on', on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        persist();
+        paint();
+        return;
+      }
+
       if (btn.hasAttribute('data-add-task')) {
         state.tasks.push({ id: 'task-' + Date.now(), name: '', from: '', to: '',
-                           phase: preset.phases[0].id, status: 'todo', at: '' });
+                           phase: state.phases[0].id, status: 'todo', at: '' });
       } else if (btn.hasAttribute('data-del-task')) {
         state.tasks.splice(+btn.closest('tr').dataset.i, 1);
+      } else if (btn.hasAttribute('data-add-phase')) {
+        state.phases.push({ id: 'ph-' + Date.now(), label: '', color: freeColor() });
+      } else if (btn.hasAttribute('data-del-phase')) {
+        if (state.phases.length < 2) return;
+        var gone = state.phases[+btn.closest('tr').dataset.i];
+        var n = usedBy(gone.id);
+        var next = state.phases.filter(function (p) { return p !== gone; })[0];
+        if (n && !confirm('「' + (gone.label || '名前なし') + '」を使っている作業が' + n + '件あります。' +
+                          'それらは「' + (next.label || '名前なし') + '」に変わります。よろしいですか？')) return;
+        state.tasks.forEach(function (t) { if (t.phase === gone.id) t.phase = next.id; });
+        state.phases = state.phases.filter(function (p) { return p !== gone; });
       } else if (btn.hasAttribute('data-restore')) {
-        if (!confirm('予定と進捗をひな形に戻します。今の内容は消えます。よろしいですか？')) return;
+        if (!confirm('予定・区分・進捗をひな形に戻します。今の内容は消えます。よろしいですか？')) return;
         state = fromPreset();
       } else return;
 

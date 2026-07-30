@@ -896,6 +896,7 @@ h3::before {
   width: 11px; height: 11px;
   border-radius: 3px;
   flex: 0 0 auto;
+  background: var(--ph-color);   /* .ph-* が付いていないものは style 属性で色を付ける */
 }
 .viz-legend .sw-unk { background-image: var(--hatch); background-color: var(--v-unk); }
 
@@ -1407,12 +1408,17 @@ h3::before {
   top: 1px;
   height: 18px;
   border-radius: 4px;
-  background: var(--v-c2);
+  background: var(--ph-color, var(--v-c2));
 }
-.gt-bar.p1 { background: var(--v-c1); }
-.gt-bar.p2 { background: var(--v-c2); }
-.gt-bar.p3 { background: var(--v-c3); }
-.gt-bar.rev { background: var(--v-rev); }
+
+/* 区分の色。--ph-color を置くだけなので、バー・凡例・色見本の
+   どれに付けても同じ色になる（背景の指定はそれぞれの側に書く） */
+.ph-c1  { --ph-color: var(--v-c1); }
+.ph-c2  { --ph-color: var(--v-c2); }
+.ph-c3  { --ph-color: var(--v-c3); }
+.ph-c4  { --ph-color: var(--v-c4); }
+.ph-rev { --ph-color: var(--v-rev); }
+.ph-unk { --ph-color: var(--v-unk); }
 
 .gt-bar > span {
   position: absolute;
@@ -1424,14 +1430,17 @@ h3::before {
   color: var(--muted);
   white-space: nowrap;
 }
+/* バーの中に置くラベル。バーの色は使う人が選べるので、
+   どの色の上でも読めるように暗い下地を敷いて白字にする
+   （色ごとに字の色を変える方法だと、中間の明るさの色で必ず読みにくくなる） */
 .gt-bar > span.inside {
-  left: 8px;
+  left: 5px;
   margin-left: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, .55);
   color: #fff;
   font-weight: 700;
-}
-@media (prefers-color-scheme: dark) {
-  .gt-bar > span.inside { color: #17160f; }
 }
 
 /* 右端に寄ったバーは、ラベルを右に置くと枠からはみ出すので左側に出す */
@@ -1442,11 +1451,26 @@ h3::before {
   margin-right: 8px;
 }
 
-/* 凡例の色見本（区分は本文側の data-phase-def で決まる） */
-.viz-legend .sw-p1  { background: var(--v-c1); }
-.viz-legend .sw-p2  { background: var(--v-c2); }
-.viz-legend .sw-p3  { background: var(--v-c3); }
-.viz-legend .sw-rev { background: var(--v-rev); }
+/* --- 区分の編集 --- */
+
+.phase-table { min-width: 520px; }
+.ph-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.ph-swatches { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.ph-sw {
+  width: 26px; height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--ph-color);
+  cursor: pointer;
+}
+.ph-sw:hover { border-color: var(--ink-2); }
+.ph-sw.is-on {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink);
+}
 
 /* --- 進捗の記録 --- */
 
