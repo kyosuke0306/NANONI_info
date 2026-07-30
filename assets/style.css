@@ -751,33 +751,42 @@ h3::before {
    ライト: #b5822f / #0d6e9e  ダーク: #bb8a35 / #3590c0
    ========================================================================== */
 
-.viz {
+/* 図の色トークンは :root に置く。.viz に置くと、図の外にある
+   フェーズカードなどから参照できず var() が未定義になる。 */
+:root {
   --v-cost:  #b5822f;   /* 支払い・原価 */
   --v-rev:   #0d6e9e;   /* 入金・売価 */
+  --v-pos:   #0d6e9e;   /* 黒字（発散バー） */
+  --v-neg:   #b8402c;   /* 赤字（発散バー） */
   --v-c1:    #855c18;   /* 逐次ランプ 濃 */
   --v-c2:    #b5822f;
   --v-c3:    #d4a659;
   --v-c4:    #e8cfa0;   /* 逐次ランプ 淡 */
   --v-unk:   #8a8377;   /* 不明・未確定（必ずハッチ＋ラベルを併用） */
-  --v-grid:  var(--line);
-
-  margin: 0 0 20px;
-  padding: 18px 20px 16px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  --hatch: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px);
 }
 
 @media (prefers-color-scheme: dark) {
-  .viz {
+  :root {
     --v-cost: #bb8a35;
     --v-rev:  #3590c0;
+    --v-pos:  #3590c0;
+    --v-neg:  #cc5f45;
     --v-c1:   #dcb15f;
     --v-c2:   #bb8a35;
     --v-c3:   #946f2b;
     --v-c4:   #6b5222;
     --v-unk:  #7d766a;
+    --hatch: repeating-linear-gradient(135deg, rgba(0,0,0,.42) 0 3px, transparent 3px 7px);
   }
+}
+
+.viz {
+  margin: 0 0 20px;
+  padding: 18px 20px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 .viz-title {
@@ -823,12 +832,6 @@ h3::before {
   flex: 0 0 auto;
 }
 .viz-legend .sw-unk { background-image: var(--hatch); background-color: var(--v-unk); }
-
-/* 不明・未確定を表すハッチ（テクスチャ＝二次エンコード） */
-.viz { --hatch: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px); }
-@media (prefers-color-scheme: dark) {
-  .viz { --hatch: repeating-linear-gradient(135deg, rgba(0,0,0,.42) 0 3px, transparent 3px 7px); }
-}
 
 /* --- 横積み上げバー（構成比） --- */
 
@@ -1076,11 +1079,6 @@ h3::before {
    ライト: #0d6e9e / #b8402c   ダーク: #3590c0 / #cc5f45
    ------------------------------------------------------------------------ */
 
-.viz { --v-pos: #0d6e9e; --v-neg: #b8402c; }
-@media (prefers-color-scheme: dark) {
-  .viz { --v-pos: #3590c0; --v-neg: #cc5f45; }
-}
-
 .diverge { display: grid; gap: 9px; }
 
 .dv-row {
@@ -1257,6 +1255,174 @@ h3::before {
   .dv-name small { display: inline; margin-left: 4px; }
 
   .db-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* --- ワッフルチャート（1マス＝1缶） --- */
+
+.waffle {
+  display: grid;
+  grid-template-columns: repeat(20, 1fr);
+  gap: 2px;                       /* サーフェス色の2pxギャップ */
+  max-width: 430px;
+  margin: 0;
+}
+.waffle i {
+  display: block;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--v-c2);
+}
+.waffle .w-paid  { background: var(--v-rev); }
+.waffle .w-spon  { background: var(--v-c1); }
+.waffle .w-taste { background: var(--v-c2); }
+.waffle .w-gift  { background: var(--v-c3); }
+.waffle .w-unk   { background-color: var(--v-c4); background-image: var(--hatch); }
+
+.waffle-scale {
+  margin: 9px 0 0;
+  max-width: 430px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- ガントチャート（工程の目安） --- */
+
+.gantt { display: grid; gap: 7px; }
+
+.gt-head, .gt-row {
+  display: grid;
+  grid-template-columns: minmax(104px, 156px) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+/* 目盛りラベルは絶対配置。space-between だと文字幅のぶん罫線とずれるため */
+.gt-head .gt-scale {
+  position: relative;
+  height: 15px;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gt-head .gt-scale > span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.gt-head .gt-scale > span:first-child { transform: none; }
+.gt-head .gt-scale > span:last-child  { transform: translateX(-100%); }
+
+.gt-name { font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.gt-name small { display: block; color: var(--muted); font-size: 10.5px; }
+
+.gt-track {
+  position: relative;
+  height: 20px;
+  /* 3ヶ月ごとの目盛り。データではないので極力後退させる */
+  background-image: repeating-linear-gradient(
+    to right, var(--line) 0 1px, transparent 1px calc(100% / 4)
+  );
+}
+
+.gt-bar {
+  position: absolute;
+  top: 1px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--v-c2);
+}
+.gt-bar.p1 { background: var(--v-c1); }
+.gt-bar.p2 { background: var(--v-c2); }
+.gt-bar.p3 { background: var(--v-c3); }
+.gt-bar.rev { background: var(--v-rev); }
+
+.gt-bar > span {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 8px;
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.gt-bar > span.inside {
+  left: 8px;
+  margin-left: 0;
+  color: #fff;
+  font-weight: 700;
+}
+@media (prefers-color-scheme: dark) {
+  .gt-bar > span.inside { color: #17160f; }
+}
+
+/* --- フェーズカード --- */
+
+.phase { display: grid; gap: 12px; }
+
+.phase-card {
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--v-c2);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.phase-card.p1 { border-left-color: var(--v-c1); }
+.phase-card.p3 { border-left-color: var(--v-c3); }
+
+.phase-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 0 0 4px;
+}
+.phase-no { font-size: 10.5px; letter-spacing: .1em; font-weight: 700; color: var(--muted); }
+.phase-title { font-size: 14px; font-weight: 700; }
+.phase-when {
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.phase-goal { margin: 0 0 10px; font-size: 12px; color: var(--ink-2); line-height: 1.7; }
+
+.phase-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+.phase-list li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.phase-list li::before {
+  content: "";
+  width: 9px; height: 9px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--v-c3);
+}
+.phase-list li.is-key::before { background: var(--v-neg); }
+/* 本文は無名グリッドアイテムとして1行目の2列目に入る。
+   .why は明示しないと2行目の「1列目（16px）」に落ち、1文字ずつ折り返して崩れる。 */
+.phase-list .why {
+  grid-column: 2;
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .waffle { grid-template-columns: repeat(20, 1fr); gap: 1.5px; }
+  .gt-head, .gt-row { grid-template-columns: minmax(0, 1fr); row-gap: 3px; }
+  .gt-head .gt-scale, .gt-track { grid-column: 1; }
+  .gt-bar > span { font-size: 10px; }
 }
 
 /* --- 検索ハイライト --- */
