@@ -1071,6 +1071,194 @@ h3::before {
   }
 }
 
+/* --- 発散バー（黒字/赤字・収支） -----------------------------------------
+   ゼロ線を挟んで左右に伸びる。amber は同時に使わない（ダークで赤と識別不能なため）。
+   ライト: #0d6e9e / #b8402c   ダーク: #3590c0 / #cc5f45
+   ------------------------------------------------------------------------ */
+
+.viz { --v-pos: #0d6e9e; --v-neg: #b8402c; }
+@media (prefers-color-scheme: dark) {
+  .viz { --v-pos: #3590c0; --v-neg: #cc5f45; }
+}
+
+.diverge { display: grid; gap: 9px; }
+
+.dv-row {
+  display: grid;
+  grid-template-columns: minmax(78px, 116px) minmax(0, 1fr) minmax(84px, auto);
+  align-items: center;
+  gap: 12px;
+}
+.dv-name { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.dv-name small { display: block; color: var(--muted); font-size: 10.5px; }
+
+.dv-track {
+  position: relative;
+  height: 20px;
+}
+/* ゼロ線 */
+.dv-track::before {
+  content: "";
+  position: absolute;
+  left: var(--zero); top: -3px; bottom: -3px;
+  width: 1px;
+  background: var(--muted);
+  opacity: .55;
+}
+.dv-bar {
+  position: absolute;
+  top: 0;
+  height: 20px;
+  background: var(--v-pos);
+}
+.dv-bar.is-pos { left: var(--zero); border-radius: 0 4px 4px 0; }
+.dv-bar.is-neg { right: calc(100% - var(--zero)); background: var(--v-neg); border-radius: 4px 0 0 4px; }
+.dv-bar.is-total { opacity: 1; }
+.dv-bar.is-sub   { opacity: .55; }
+
+.dv-val {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.dv-val small { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.dv-row.is-loss .dv-val { color: var(--v-neg); }
+.dv-row.is-gain .dv-val { color: var(--v-pos); }
+
+.dv-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- しきい値つき棒グラフ（損益分岐） --- */
+
+.thr-chart { position: relative; display: grid; gap: 9px; }
+
+.thr-row {
+  display: grid;
+  grid-template-columns: minmax(74px, 108px) minmax(0, 1fr) minmax(88px, auto);
+  align-items: center;
+  gap: 12px;
+}
+.thr-name { font-size: 12px; color: var(--ink-2); }
+.thr-track { position: relative; height: 18px; }
+.thr-fill {
+  display: block;
+  height: 18px;
+  border-radius: 0 4px 4px 0;
+  background: var(--v-pos);
+  min-width: 2px;
+}
+.thr-row.is-under .thr-fill { background: var(--v-neg); }
+.thr-val { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.thr-val small { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.thr-row.is-under .thr-val { color: var(--v-neg); }
+
+/* しきい値の縦線。各トラック内に置き、行間ぶん上下に伸ばして1本につなげる */
+.thr-line {
+  position: absolute;
+  top: -6px; bottom: -6px;
+  width: 0;
+  border-left: 2px dashed var(--muted);
+  opacity: .75;
+  pointer-events: none;
+}
+.thr-line > span {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 3px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg-tint);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.thr-chart { padding-top: 22px; }   /* しきい値ラベルの逃げ */
+
+/* --- ダンベル（変更前→変更後） --- */
+
+.dumbbell { display: grid; gap: 14px; }
+
+.db-row {
+  display: grid;
+  grid-template-columns: minmax(84px, 128px) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+.db-name { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.db-track { position: relative; height: 26px; }
+.db-line {
+  position: absolute;
+  top: 12px; height: 2px;
+  background: var(--v-pos);
+  opacity: .45;
+}
+.db-dot {
+  position: absolute;
+  top: 5px;
+  width: 16px; height: 16px;      /* マーカーは8px以上 */
+  margin-left: -8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--surface);   /* サーフェス色のリング */
+}
+.db-dot.is-before { background: var(--v-pos); opacity: .42; }
+.db-dot.is-after  { background: var(--v-pos); }
+.db-tag {
+  position: absolute;
+  top: 24px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.db-tag small { font-weight: 400; color: var(--muted); }
+
+/* --- 課金単位のマトリクス --- */
+
+.unit-matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; }
+.um-card {
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--v-cost);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.um-card p { margin: 0; }
+.um-kind { font-size: 10.5px; letter-spacing: .09em; font-weight: 700; color: var(--muted); }
+.um-price { margin: 6px 0 0 !important; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.um-item { margin: 5px 0 0 !important; font-size: 11.5px; line-height: 1.6; color: var(--ink-2); }
+.um-card.is-fixed { border-top-color: var(--v-pos); }
+.um-card.is-fixed .um-kind { color: var(--v-pos); }
+
+@media (max-width: 560px) {
+  /* 見出しを1行目に全幅で置き、2行目でバーと数値を横並びにする
+     （3行に割れて数値がバーから離れるのを防ぐ） */
+  .dv-row, .thr-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 3px;
+    column-gap: 10px;
+  }
+  .dv-name, .thr-name { grid-column: 1 / -1; }
+  .dv-track, .thr-track { grid-column: 1; }
+  .dv-val, .thr-val { grid-column: 2; text-align: right; }
+  .dv-name small { display: inline; margin-left: 4px; }
+
+  .db-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
 /* --- 検索ハイライト --- */
 
 section.filtered-out { display: none; }
