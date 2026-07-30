@@ -110,17 +110,28 @@
     gateBtn.disabled = true;
     gateMsg.textContent = '復号中…';
 
-    return decrypt(password)
-      .then(function (html) {
+    // 復号の失敗と、描画の失敗は分けて扱う。まとめて catch すると
+    // ページ側の不具合まで「パスワードが違います」と出てしまい、原因が分からなくなる。
+    return decrypt(password).then(
+      function (html) {
         try { sessionStorage.setItem(SESSION_KEY, password); } catch (e) { /* 非対応環境は無視 */ }
-        render(html);
+
+        try {
+          render(html);
+        } catch (err) {
+          if (window.console) console.error(err);
+          gateBtn.disabled = false;
+          gateMsg.textContent = 'パスワードは合っていますが、ページの組み立てに失敗しました。';
+          return;
+        }
+
         gate.hidden = true;
         app.hidden = false;
         document.body.style.overflow = '';
         gateMsg.textContent = '';
         gateBtn.disabled = false;
-      })
-      .catch(function () {
+      },
+      function () {
         // GCM の認証タグ検証に失敗 = パスワードが違う
         try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
         gateBtn.disabled = false;
@@ -131,7 +142,8 @@
         void gateCard.offsetWidth;
         gateCard.classList.add('shake');
         gateInput.focus();
-      });
+      }
+    );
   }
 
   function relock() {
@@ -240,6 +252,14 @@
       };
     }
 
+    // 何も入っていない状態。区分は選択肢として1つだけ残す（0個だと作業を足せない）
+    function emptyState() {
+      return {
+        phases: [{ id: 'ph-' + Date.now(), label: '', color: PHASE_COLORS[0].id }],
+        tasks: []
+      };
+    }
+
     function isColor(id) {
       return PHASE_COLORS.some(function (c) { return c.id === id; });
     }
@@ -345,8 +365,7 @@
 
     var io = ioPanel(function () { return state; },
                      function (next) { state = normalize(next); persist(); rebuild(); },
-                     fromPreset);
-    io.querySelector('[data-reset]').textContent = 'ひな形に戻す';
+                     emptyState, '作業・区分・進捗');
     panel.appendChild(io);
 
     var tbody = panel.querySelector('[data-prog-body]');
@@ -612,8 +631,10 @@
     });
   }
 
-  // 「書き出し / 読み込み」のパネル。進捗も第2ロットも同じ形で共有する。
-  function ioPanel(getState, setState, blankState) {
+  // 「書き出し / 読み込み」のパネル。スケジュールも第2ロットも同じ形で共有する。
+  //   emptyState … 「全て空欄にする」で戻す先。何も入っていない状態を返すこと
+  //   whatClears … 確認ダイアログで「何が消えるか」を伝える文言
+  function ioPanel(getState, setState, emptyState, whatClears) {
     var box = document.createElement('details');
     box.className = 'prog-io';
     box.innerHTML =
@@ -624,7 +645,8 @@
       '<div class="prog-io-btns">' +
         '<button type="button" data-copy>コピーする</button>' +
         '<button type="button" data-load>読み込む</button>' +
-        '<button type="button" data-reset>すべて消す</button>' +
+        '<button type="button" data-undo hidden>空欄にする前に戻す</button>' +
+        '<button type="button" data-reset>全て空欄にする</button>' +
       '</div>' +
       '<p class="prog-io-msg" data-io-msg role="status" aria-live="polite"></p>';
 
@@ -654,10 +676,27 @@
       msg('読み込みました');
     });
 
+    // 押し間違え用の控え。空欄にする直前の内容をここに持っておく
+    var undoSnapshot = null;
+    var undoBtn = box.querySelector('[data-undo]');
+
     box.querySelector('[data-reset]').addEventListener('click', function () {
-      if (!confirm('入力した内容をすべて消します。よろしいですか？')) return;
-      setState(blankState());
-      msg('消しました');
+      var before = JSON.stringify(getState());
+      if (!confirm((whatClears || '入力した内容') + 'をすべて消して、空欄の状態にします。\n' +
+                   '押し間違えたときは「空欄にする前に戻す」で戻せます。\n\nよろしいですか？')) return;
+
+      undoSnapshot = before;
+      undoBtn.hidden = false;
+      setState(emptyState());
+      msg('空欄にしました');
+    });
+
+    undoBtn.addEventListener('click', function () {
+      if (!undoSnapshot) return;
+      setState(JSON.parse(undoSnapshot));
+      undoSnapshot = null;
+      undoBtn.hidden = true;
+      msg('空欄にする前に戻しました');
     });
 
     box.sync = function () { ta.value = JSON.stringify(getState()); };
@@ -688,17 +727,21 @@
     var preset = readPreset();
     if (!sec || !preset) return;
 
-    function blank() {
-      return {
-        base: { cans: '', perCase: '', shops: '', price: '' },
-        costs: preset.costs.map(function (c) { return { item: c.item, unit: c.unit, amount: '' }; }),
-        stock: []
-      };
+    // 何も入っていない状態（図の案内文を出す empty(host, text) とは別物）
+    function emptyState() {
+      return { base: { cans: '', perCase: '', shops: '', price: '' }, costs: [], stock: [] };
+    }
+
+    // 初回に出す下書き。項目名だけ第1ロットから借りて、金額は空にしておく
+    function scaffold() {
+      var s = emptyState();
+      s.costs = preset.costs.map(function (c) { return { item: c.item, unit: c.unit, amount: '' }; });
+      return s;
     }
 
     var state = readStore(LOT2_KEY, null);
-    if (!state || !Array.isArray(state.costs)) state = blank();
-    if (!state.base) state.base = blank().base;
+    if (!state || !Array.isArray(state.costs)) state = scaffold();
+    if (!state.base) state.base = emptyState().base;
     if (!Array.isArray(state.stock)) state.stock = [];
 
     var wrap = document.createElement('div');
@@ -743,7 +786,7 @@
 
     var io = ioPanel(function () { return state; },
                      function (next) { state = normalize(next); persist(); rebuild(); },
-                     blank);
+                     emptyState, '基本の数字・費用・在庫');
     sec.appendChild(io);
 
     function field(key, label, unit, ph, step) {
@@ -754,7 +797,7 @@
     }
 
     function normalize(next) {
-      var b = blank();
+      var b = emptyState();
       if (!next || typeof next !== 'object') return b;
       return {
         base:  (next.base && typeof next.base === 'object') ? next.base : b.base,
@@ -810,18 +853,21 @@
 
     function rebuild() {
       var cb = wrap.querySelector('[data-cost-body]');
-      cb.innerHTML = state.costs.map(function (c, i) {
-        return '<tr data-i="' + i + '">' +
-          '<td><input type="text" data-c="item" value="' + esc(c.item) + '" placeholder="項目名"></td>' +
-          '<td><select data-c="unit">' + UNITS.map(function (u) {
-            return '<option value="' + u.id + '"' + (u.id === c.unit ? ' selected' : '') + '>' + u.label + '</option>';
-          }).join('') + '</select></td>' +
-          '<td><input type="number" inputmode="decimal" min="0" step="0.01" data-c="amount" ' +
-            'value="' + esc(c.amount) + '" placeholder="—"></td>' +
-          '<td class="num" data-c-total>—</td><td class="num" data-c-percan>—</td>' +
-          '<td><button type="button" class="l2-del" data-del-cost aria-label="この行を消す">×</button></td>' +
-        '</tr>';
-      }).join('');
+      cb.innerHTML = state.costs.length
+        ? state.costs.map(function (c, i) {
+            return '<tr data-i="' + i + '">' +
+              '<td><input type="text" data-c="item" value="' + esc(c.item) + '" placeholder="項目名"></td>' +
+              '<td><select data-c="unit">' + UNITS.map(function (u) {
+                return '<option value="' + u.id + '"' + (u.id === c.unit ? ' selected' : '') + '>' + u.label + '</option>';
+              }).join('') + '</select></td>' +
+              '<td><input type="number" inputmode="decimal" min="0" step="0.01" data-c="amount" ' +
+                'value="' + esc(c.amount) + '" placeholder="—"></td>' +
+              '<td class="num" data-c-total>—</td><td class="num" data-c-percan>—</td>' +
+              '<td><button type="button" class="l2-del" data-del-cost aria-label="この行を消す">×</button></td>' +
+            '</tr>';
+          }).join('')
+        : '<tr class="l2-none"><td colspan="6">項目がありません。' +
+          '「項目を足す」か「第1ロットの数字を入れる」を押してください。</td></tr>';
 
       var sb = wrap.querySelector('[data-stock-body]');
       sb.innerHTML = state.stock.length

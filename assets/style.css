@@ -1581,6 +1581,15 @@ h3::before {
 .prog-io-btns button[data-reset] { margin-left: auto; color: var(--red); }
 .prog-io-btns button[data-reset]:hover { border-color: var(--red); color: var(--red); }
 
+/* 「元に戻す」が出ているあいだは、そちらを右端の起点にする */
+.prog-io-btns button[data-undo] {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.prog-io-btns button[data-undo]:not([hidden]) ~ button[data-reset] { margin-left: 0; }
+
 .prog-io-msg { min-height: 1.4em; margin: 9px 0 0; font-size: 12px; color: var(--accent); }
 
 @media (max-width: 560px) {
