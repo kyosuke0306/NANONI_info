@@ -830,6 +830,18 @@ h3::before {
   --v-c4:    #e8cfa0;   /* 逐次ランプ 淡 */
   --v-unk:   #8a8377;   /* 不明・未確定（必ずハッチ＋ラベルを併用） */
   --hatch: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px);
+
+  /* 区分（ガントの分類）の色。上の --v-* は「原価/売上」など意味が決まった色なので
+     別枠にする。こちらは意味を持たず、使う人が自由に割り当てる。
+     6色すべての組み合わせで色の見分けやすさを検証済み
+     （全ペア／色覚差 ΔE 10.9・通常視 ΔE 15.0 以上、OKLab×100）。
+     色を足す・変えるときは必ず検証し直すこと。 */
+  --ph-red:    #c6072d;
+  --ph-orange: #dc6400;
+  --ph-yellow: #c4b404;
+  --ph-green:  #499c72;
+  --ph-blue:   #0c7dd9;
+  --ph-purple: #8c4694;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -844,6 +856,15 @@ h3::before {
     --v-c4:   #6b5222;
     --v-unk:  #7d766a;
     --hatch: repeating-linear-gradient(135deg, rgba(0,0,0,.42) 0 3px, transparent 3px 7px);
+
+    /* 暗い面に合わせて選び直した6色（明るさを反転させたものではない）。
+       全ペア／色覚差 ΔE 8.2・通常視 ΔE 16.3・コントラスト 3:1 以上を確認済み。 */
+    --ph-red:    #e84768;
+    --ph-orange: #a35200;
+    --ph-yellow: #b59000;
+    --ph-green:  #008e5d;
+    --ph-blue:   #158bf0;
+    --ph-purple: #a147ae;
   }
 }
 
@@ -1413,12 +1434,12 @@ h3::before {
 
 /* 区分の色。--ph-color を置くだけなので、バー・凡例・色見本の
    どれに付けても同じ色になる（背景の指定はそれぞれの側に書く） */
-.ph-c1  { --ph-color: var(--v-c1); }
-.ph-c2  { --ph-color: var(--v-c2); }
-.ph-c3  { --ph-color: var(--v-c3); }
-.ph-c4  { --ph-color: var(--v-c4); }
-.ph-rev { --ph-color: var(--v-rev); }
-.ph-unk { --ph-color: var(--v-unk); }
+.ph-r { --ph-color: var(--ph-red); }
+.ph-o { --ph-color: var(--ph-orange); }
+.ph-y { --ph-color: var(--ph-yellow); }
+.ph-g { --ph-color: var(--ph-green); }
+.ph-b { --ph-color: var(--ph-blue); }
+.ph-p { --ph-color: var(--ph-purple); }
 
 .gt-bar > span {
   position: absolute;

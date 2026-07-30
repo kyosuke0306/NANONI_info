@@ -35,16 +35,19 @@
     { id: 'done',  label: '完了' }
   ];
 
-  // 区分に選べる色。色の見分けやすさを確かめた組み合わせだけを出す
-  // （赤と茶は暗い画面で見分けにくいので、赤は入れていない）
+  // 区分に選べる色。実際の色は style.css の --ph-* にある。
+  // 6色すべての組み合わせで見分けやすさを検証済み（明・暗の両方）。
   var PHASE_COLORS = [
-    { id: 'c1',  label: '濃い茶' },
-    { id: 'c2',  label: '茶' },
-    { id: 'c3',  label: '薄い茶' },
-    { id: 'c4',  label: 'ごく薄い茶' },
-    { id: 'rev', label: '青' },
-    { id: 'unk', label: '灰' }
+    { id: 'r', label: '赤' },
+    { id: 'o', label: '橙' },
+    { id: 'y', label: '黄' },
+    { id: 'g', label: '緑' },
+    { id: 'b', label: '青' },
+    { id: 'p', label: '紫' }
   ];
+
+  // 茶色の濃淡だった頃の記録を引き継ぐための対応表
+  var OLD_PHASE_COLORS = { c1: 'o', c2: 'y', c3: 'r', c4: 'g', rev: 'b', unk: 'p' };
 
   // 費用の単位。lot2 ページの計算はすべてここを見る
   var UNITS = [
@@ -244,7 +247,7 @@
     function fromPreset() {
       return {
         phases: preset.phases.map(function (p) {
-          return { id: p.id, label: p.label, color: p.color };
+          return { id: p.id, label: p.label, color: toColor(p.color) };
         }),
         tasks: preset.tasks.map(function (t) {
           return { id: t.id, name: t.name, from: t.from, to: t.to, phase: t.phase, status: 'todo', at: '' };
@@ -260,8 +263,10 @@
       };
     }
 
-    function isColor(id) {
-      return PHASE_COLORS.some(function (c) { return c.id === id; });
+    // 色の指定を今の6色に読み替える。茶色の濃淡だった頃の記録もここで拾う。
+    function toColor(id) {
+      if (PHASE_COLORS.some(function (c) { return c.id === id; })) return id;
+      return OLD_PHASE_COLORS[id] || PHASE_COLORS[0].id;
     }
 
     // 状態だけを持っていた古い記録（進捗のみ）を引き継ぐ
@@ -287,7 +292,7 @@
               return {
                 id: String(p.id),
                 label: p.label == null ? '' : String(p.label),
-                color: isColor(p.color) ? p.color : PHASE_COLORS[0].id
+                color: toColor(p.color)
               };
             })
           : fromPreset().phases;
