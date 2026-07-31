@@ -26,6 +26,15 @@
 
   var PROGRESS_KEY = 'nanoni.progress.v1';   // 旧・進捗だけの記録（読み込んで引き継ぐ）
   var SCHEDULE_KEY = 'nanoni.schedule.v1';  // 予定＋進捗
+  var GH_TOKEN_KEY = 'nanoni.ghtoken.v1';   // 共有用の GitHub トークン
+  var MYNAME_KEY   = 'nanoni.myname.v1';    // 共有したときに残す名前
+
+  // 優先度。色だけに頼らないよう、丸の数でも表す
+  var PRIORITIES = [
+    { id: 'high', label: '高', dots: '●●●' },
+    { id: 'mid',  label: '中', dots: '●●○' },
+    { id: 'low',  label: '低', dots: '●○○' }
+  ];
   var LOT2_KEY     = 'nanoni.lot2.v1';
   var APIKEY_KEY   = 'nanoni.apikey.v1';
 
@@ -78,7 +87,16 @@
     return out;
   }
 
-  function deriveKey(password, salt, iterations) {
+  function bytesToB64(bytes) {
+    var out = '';
+    // 一度に渡すと大きい配列でスタックが溢れるので小分けにする
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(out);
+  }
+
+  function deriveKey(password, salt, iterations, usages) {
     return crypto.subtle
       .importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey'])
       .then(function (base) {
@@ -87,9 +105,39 @@
           base,
           { name: 'AES-GCM', length: 256 },
           false,
-          ['decrypt']
+          usages || ['decrypt']
         );
       });
+  }
+
+  // 共有する記録も本文と同じ方式で包む（公開リポジトリに平文を置かないため）
+  var SHARE_ITERATIONS = 310000;
+
+  function encryptText(password, text) {
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var iv   = crypto.getRandomValues(new Uint8Array(12));
+    return deriveKey(password, salt, SHARE_ITERATIONS, ['encrypt'])
+      .then(function (key) {
+        return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key,
+                                     new TextEncoder().encode(text));
+      })
+      .then(function (buf) {
+        return { v: 1, iterations: SHARE_ITERATIONS, salt: bytesToB64(salt),
+                 iv: bytesToB64(iv), ct: bytesToB64(new Uint8Array(buf)) };
+      });
+  }
+
+  function decryptBlob(password, blob) {
+    return deriveKey(password, b64ToBytes(blob.salt), blob.iterations, ['decrypt'])
+      .then(function (key) {
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(blob.iv) }, key,
+                                     b64ToBytes(blob.ct));
+      })
+      .then(function (buf) { return new TextDecoder().decode(buf); });
+  }
+
+  function sessionPassword() {
+    try { return sessionStorage.getItem(SESSION_KEY) || ''; } catch (e) { return ''; }
   }
 
   function decrypt(password) {
@@ -212,14 +260,22 @@
     var el = docEl.querySelector('[data-schedule-preset]');
     if (!el) return null;
     return {
+      share: {
+        repo:   el.dataset.shareRepo   || '',
+        path:   el.dataset.sharePath   || 'data/schedule.json',
+        branch: el.dataset.shareBranch || 'main'
+      },
       phases: Array.prototype.map.call(el.querySelectorAll('[data-phase-def]'), function (s) {
         return { id: s.dataset.phaseDef, label: s.dataset.label, color: s.dataset.color };
       }),
+      members: Array.prototype.map.call(el.querySelectorAll('[data-member]'), function (s) {
+        return { id: s.dataset.member, name: s.dataset.name };
+      }),
       tasks: Array.prototype.map.call(el.querySelectorAll('[data-task]'), function (s) {
         return {
-          id: s.dataset.task, name: s.dataset.name,
+          id: s.dataset.task, name: s.dataset.name, detail: s.dataset.detail || '',
           from: s.dataset.from, to: s.dataset.to,
-          phase: s.dataset.phase, status: 'todo', at: ''
+          phase: s.dataset.phase, priority: s.dataset.priority || 'mid'
         };
       })
     };
@@ -249,21 +305,29 @@
         phases: preset.phases.map(function (p) {
           return { id: p.id, label: p.label, color: toColor(p.color) };
         }),
+        members: preset.members.map(function (m) {
+          return { id: m.id, name: m.name };
+        }),
         tasks: preset.tasks.map(function (t) {
-          return { id: t.id, name: t.name, from: t.from, to: t.to, phase: t.phase, status: 'todo', at: '' };
+          return { id: t.id, name: t.name, detail: t.detail, from: t.from, to: t.to,
+                   phase: t.phase, assignee: '', priority: t.priority, status: 'todo', at: '' };
         })
       };
     }
 
     // 何も入っていない状態
     function emptyState() {
-      return { phases: [], tasks: [] };
+      return { phases: [], members: [], tasks: [] };
     }
 
     // 色の指定を今の6色に読み替える。茶色の濃淡だった頃の記録もここで拾う。
     function toColor(id) {
       if (PHASE_COLORS.some(function (c) { return c.id === id; })) return id;
       return OLD_PHASE_COLORS[id] || PHASE_COLORS[0].id;
+    }
+
+    function toPriority(id) {
+      return PRIORITIES.some(function (p) { return p.id === id; }) ? id : 'mid';
     }
 
     // 状態だけを持っていた古い記録（進捗のみ）を引き継ぐ
@@ -277,52 +341,60 @@
       return base;
     }
 
-    // 受け取った JSON を整える。作業だけの古い形式も読めるようにしておく
+    // 受け取った JSON を整える。項目が足りない古い記録も読めるようにしておく。
     function normalize(next) {
       if (!next || typeof next !== 'object') return fromPreset();
-
-      if (Array.isArray(next.tasks)) {
-        // 区分の項目そのものが無い記録（区分が編集できなかった頃のもの）はひな形の区分を使う。
-        // phases: [] は「全部消した」という意思表示なので、そのまま空で受ける。
-        var phases = Array.isArray(next.phases)
-          ? next.phases.filter(function (p) { return p && typeof p === 'object' && p.id; })
-                       .map(function (p) {
-              return {
-                id: String(p.id),
-                label: p.label == null ? '' : String(p.label),
-                color: toColor(p.color)
-              };
-            })
-          : fromPreset().phases;
-
-        var known = {};
-        phases.forEach(function (p) { known[p.id] = 1; });
-
-        return {
-          phases: phases,
-          tasks: next.tasks.filter(function (t) { return t && typeof t === 'object'; })
-                           .map(function (t, i) {
-            return {
-              id: t.id || ('t' + i + '-' + Date.now()),
-              name: t.name == null ? '' : String(t.name),
-              from: t.from == null ? '' : String(t.from),
-              to:   t.to   == null ? '' : String(t.to),
-              // 無くなった区分を指している作業は先頭の区分に寄せる（区分が0個なら区分なし）
-              phase: known[t.phase] ? t.phase : (phases.length ? phases[0].id : ''),
-              status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
-              at: t.at == null ? '' : String(t.at)
-            };
-          })
-        };
+      if (!Array.isArray(next.tasks)) {
+        // 旧形式 { taskId: { status, at } } … 進捗だけを今の予定に重ねる
+        var base = fromPreset();
+        base.tasks.forEach(function (t) {
+          var rec = next[t.id];
+          if (rec && rec.status) { t.status = rec.status; t.at = rec.at || ''; }
+        });
+        return base;
       }
 
-      // 旧形式 { taskId: { status, at } } … 進捗だけを今の予定に重ねる
-      var base = fromPreset();
-      base.tasks.forEach(function (t) {
-        var rec = next[t.id];
-        if (rec && rec.status) { t.status = rec.status; t.at = rec.at || ''; }
-      });
-      return base;
+      // 区分の項目そのものが無い記録はひな形の区分を使う。
+      // phases: [] は「全部消した」という意思表示なので、そのまま空で受ける。
+      var phases = Array.isArray(next.phases)
+        ? next.phases.filter(function (p) { return p && typeof p === 'object' && p.id; })
+                     .map(function (p) {
+            return { id: String(p.id), label: p.label == null ? '' : String(p.label),
+                     color: toColor(p.color) };
+          })
+        : fromPreset().phases;
+
+      var members = Array.isArray(next.members)
+        ? next.members.filter(function (m) { return m && typeof m === 'object' && m.id; })
+                      .map(function (m) {
+            return { id: String(m.id), name: m.name == null ? '' : String(m.name) };
+          })
+        : fromPreset().members;
+
+      var knownP = {}, knownM = {};
+      phases.forEach(function (p) { knownP[p.id] = 1; });
+      members.forEach(function (m) { knownM[m.id] = 1; });
+
+      return {
+        phases: phases,
+        members: members,
+        tasks: next.tasks.filter(function (t) { return t && typeof t === 'object'; })
+                         .map(function (t, i) {
+          return {
+            id: t.id || ('t' + i + '-' + Date.now()),
+            name:   t.name   == null ? '' : String(t.name),
+            detail: t.detail == null ? '' : String(t.detail),
+            from:   t.from   == null ? '' : String(t.from),
+            to:     t.to     == null ? '' : String(t.to),
+            // 無くなった区分を指している作業は先頭の区分に寄せる（区分が0個なら区分なし）
+            phase: knownP[t.phase] ? t.phase : (phases.length ? phases[0].id : ''),
+            assignee: knownM[t.assignee] ? t.assignee : '',
+            priority: toPriority(t.priority),
+            status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
+            at: t.at == null ? '' : String(t.at)
+          };
+        })
+      };
     }
 
     var stored = readStore(SCHEDULE_KEY, null);
@@ -332,24 +404,40 @@
     panel.id = 'progress';
     panel.innerHTML =
       '<h2>予定と進捗の記録</h2>' +
-      '<div class="callout callout-note">' +
-        '<p class="callout-title">この端末にだけ保存されます</p>' +
-        '<p>書き換えた予定と進捗はブラウザの中に保存されるため、<strong>ほかの人の画面には出ません</strong>。' +
-        '共有したいときは下の「記録の書き出し / 読み込み」でコピーして渡し、相手が「読み込む」に貼り付けてください。</p>' +
-      '</div>' +
       '<div class="prog-summary">' +
         '<p class="prog-count"><b data-done>0</b> / <span data-total>0</span> 完了</p>' +
         '<div class="prog-meter"><span data-meter style="width:0%"></span></div>' +
       '</div>' +
+
       '<h3 id="schedule-tasks">作業</h3>' +
       '<table class="tbl tbl-edit prog-table"><thead><tr>' +
-        '<th style="width:28%">作業</th><th style="width:16%">開始</th><th style="width:16%">終了</th>' +
-        '<th style="width:22%">区分</th><th style="width:16%">状態</th>' +
+        '<th style="width:24%">項目名</th><th style="width:13%">開始</th><th style="width:13%">終了</th>' +
+        '<th style="width:15%">区分</th><th style="width:13%">担当</th>' +
+        '<th style="width:11%">優先度</th><th style="width:11%">状態</th>' +
         '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
       '</tr></thead><tbody data-prog-body></tbody></table>' +
       '<div class="l2-actions">' +
         '<button type="button" data-add-task>作業を足す</button>' +
         '<button type="button" class="is-danger" data-clear-tasks>全て削除する</button>' +
+      '</div>' +
+
+      '<h3 id="schedule-detail">作業の内容</h3>' +
+      '<p class="viz-note">図には項目名だけを出します。くわしい中身はここに書いてください。</p>' +
+      '<table class="tbl tbl-edit detail-table"><thead><tr>' +
+        '<th style="width:26%">項目名</th><th style="width:10%">優先度</th><th>内容</th>' +
+      '</tr></thead><tbody data-detail-body></tbody></table>' +
+
+      '<h3 id="schedule-by-member">担当者ごとの担当項目</h3>' +
+      '<div data-by-member></div>' +
+
+      '<h3 id="schedule-members">担当者</h3>' +
+      '<table class="tbl tbl-edit member-table"><thead><tr>' +
+        '<th style="width:60%">名前</th><th style="width:38%">受け持ち</th>' +
+        '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
+      '</tr></thead><tbody data-member-body></tbody></table>' +
+      '<div class="l2-actions">' +
+        '<button type="button" data-add-member>担当者を足す</button>' +
+        '<button type="button" class="is-danger" data-clear-members>全て削除する</button>' +
       '</div>' +
 
       '<h3 id="schedule-phases">区分（バーの色）</h3>' +
@@ -365,20 +453,28 @@
 
     docEl.querySelector('#schedule').appendChild(panel);
 
+    var share = buildShare();
+    panel.insertBefore(share.el, panel.querySelector('.prog-summary'));
+
     var io = ioPanel(function () { return state; },
-                     function (next) { state = normalize(next); persist(); rebuild(); },
-                     emptyState, '作業・区分・進捗');
+                     function (next) { state = normalize(next); touch(); rebuild(); },
+                     emptyState, '作業・内容・担当者・区分・進捗');
     panel.appendChild(io);
 
     var tbody = panel.querySelector('[data-prog-body]');
+    var dbody = panel.querySelector('[data-detail-body]');
+    var mbody = panel.querySelector('[data-member-body]');
     var pbody = panel.querySelector('[data-phase-body]');
 
-    function persist() {
+    // 端末に保存し、共有側とずれている印を立てる
+    function touch() {
       writeStore(SCHEDULE_KEY, state);
+      share.markDirty();
       io.sync();
     }
 
-    // 区分は0個にもできるので、必ず何か返す
+    /* ---- 参照 ---- */
+
     var NO_PHASE = { id: '', label: '', color: PHASE_COLORS[0].id };
     function phaseOf(id) {
       for (var i = 0; i < state.phases.length; i++) {
@@ -386,9 +482,21 @@
       }
       return state.phases[0] || NO_PHASE;
     }
-
+    function memberName(id) {
+      for (var i = 0; i < state.members.length; i++) {
+        if (state.members[i].id === id) return state.members[i].name || '（名前なし）';
+      }
+      return '';
+    }
+    function priorityOf(id) {
+      for (var i = 0; i < PRIORITIES.length; i++) if (PRIORITIES[i].id === id) return PRIORITIES[i];
+      return PRIORITIES[1];
+    }
     function usedBy(phaseId) {
       return state.tasks.filter(function (t) { return t.phase === phaseId; }).length;
+    }
+    function heldBy(memberId) {
+      return state.tasks.filter(function (t) { return t.assignee === memberId; }).length;
     }
 
     // 区分を足すときは、まだ使っていない色から選ぶ（全部使っていたら順に回す）
@@ -401,57 +509,103 @@
       return PHASE_COLORS[state.phases.length % PHASE_COLORS.length].id;
     }
 
+    // 優先度の見た目。色だけに頼らないよう、丸の数でも表す
+    function priChip(id) {
+      var p = priorityOf(id);
+      return '<span class="pri pri-' + p.id + '"><i aria-hidden="true">' + p.dots + '</i>' + p.label + '</span>';
+    }
+
     /* ---- 表 ---- */
 
-    // 区分が1つでもあるなら、どの区分にも属さない作業は先頭の区分に寄せる。
-    // （区分を全部消したあとに足し直したとき、表の見た目と中身がずれないように）
+    // 区分・担当者が1つでもあるなら、どれにも属さない作業は先頭に寄せる
     function reconcile() {
-      if (!state.phases.length) return;
-      var known = {};
-      state.phases.forEach(function (p) { known[p.id] = 1; });
-      state.tasks.forEach(function (t) { if (!known[t.phase]) t.phase = state.phases[0].id; });
+      var knownP = {}, knownM = {};
+      state.phases.forEach(function (p) { knownP[p.id] = 1; });
+      state.members.forEach(function (m) { knownM[m.id] = 1; });
+      state.tasks.forEach(function (t) {
+        if (state.phases.length && !knownP[t.phase]) t.phase = state.phases[0].id;
+        if (!knownM[t.assignee]) t.assignee = '';
+      });
+    }
+
+    function options(list, sel, blank) {
+      return (blank ? '<option value=""' + (sel ? '' : ' selected') + '>' + blank + '</option>' : '') +
+        list.map(function (o) {
+          return '<option value="' + esc(o.id) + '"' + (o.id === sel ? ' selected' : '') + '>' +
+                 esc(o.label) + '</option>';
+        }).join('');
     }
 
     function rebuild() {
       reconcile();
+
       tbody.innerHTML = state.tasks.length
         ? state.tasks.map(function (t, i) {
             return '<tr data-i="' + i + '">' +
-              '<td><input type="text" data-t="name" value="' + esc(t.name) + '" placeholder="作業の名前"></td>' +
+              '<td><input type="text" data-t="name" value="' + esc(t.name) + '" placeholder="項目名"></td>' +
               '<td><input type="month" data-t="from" value="' + esc(t.from) + '"></td>' +
               '<td><input type="month" data-t="to" value="' + esc(t.to) + '"></td>' +
               '<td><select data-t="phase"' + (state.phases.length ? '' : ' disabled') + '>' +
                 (state.phases.length
-                  ? state.phases.map(function (p) {
-                      return '<option value="' + esc(p.id) + '"' + (p.id === t.phase ? ' selected' : '') + '>' +
-                             esc(p.label || '（名前なし）') + '</option>';
-                    }).join('')
+                  ? options(state.phases.map(function (p) {
+                      return { id: p.id, label: p.label || '（名前なし）' }; }), t.phase, '')
                   : '<option value="">（区分なし）</option>') +
               '</select></td>' +
-              '<td><select data-t="status">' + STATUSES.map(function (s) {
-                return '<option value="' + s.id + '"' + (s.id === t.status ? ' selected' : '') + '>' +
-                       s.label + '</option>';
-              }).join('') + '</select></td>' +
+              '<td><select data-t="assignee"' + (state.members.length ? '' : ' disabled') + '>' +
+                (state.members.length
+                  ? options(state.members.map(function (m) {
+                      return { id: m.id, label: m.name || '（名前なし）' }; }), t.assignee, '未割当')
+                  : '<option value="">（担当者なし）</option>') +
+              '</select></td>' +
+              '<td><select data-t="priority" data-pri="' + esc(t.priority) + '" ' +
+                'aria-label="優先度">' +
+                options(PRIORITIES.map(function (p) {
+                  return { id: p.id, label: p.label }; }), t.priority, '') +
+              '</select></td>' +
+              '<td><select data-t="status">' +
+                options(STATUSES.map(function (s) { return { id: s.id, label: s.label }; }), t.status, '') +
+              '</select></td>' +
               '<td><button type="button" class="l2-del" data-del-task aria-label="この作業を消す">×</button></td>' +
             '</tr>';
           }).join('')
-        : '<tr class="l2-none"><td colspan="6">作業がありません。「作業を足す」から入れてください。</td></tr>';
+        : '<tr class="l2-none"><td colspan="8">作業がありません。「作業を足す」から入れてください。</td></tr>';
+
+      dbody.innerHTML = state.tasks.length
+        ? state.tasks.map(function (t, i) {
+            return '<tr data-i="' + i + '">' +
+              '<td class="dt-name">' + esc(t.name || '（名前なし）') + '</td>' +
+              '<td>' + priChip(t.priority) + '</td>' +
+              '<td><textarea data-t="detail" rows="2" placeholder="くわしい中身・決めること・必要な材料など">' +
+                esc(t.detail) + '</textarea></td>' +
+            '</tr>';
+          }).join('')
+        : '<tr class="l2-none"><td colspan="3">作業がありません。</td></tr>';
+
+      mbody.innerHTML = state.members.length
+        ? state.members.map(function (m, i) {
+            return '<tr data-i="' + i + '">' +
+              '<td><input type="text" data-m="name" value="' + esc(m.name) + '" placeholder="名前"></td>' +
+              '<td class="ph-count">' + heldBy(m.id) + '件</td>' +
+              '<td><button type="button" class="l2-del" data-del-member aria-label="この担当者を消す">×</button></td>' +
+            '</tr>';
+          }).join('')
+        : '<tr class="l2-none"><td colspan="3">担当者がいません。' +
+          '「担当者を足す」から登録すると、作業に割り当てられます。</td></tr>';
 
       pbody.innerHTML = state.phases.length
         ? state.phases.map(function (p, i) {
-        var n = usedBy(p.id);
-        return '<tr data-i="' + i + '">' +
-          '<td><input type="text" data-ph="label" value="' + esc(p.label) + '" placeholder="区分の名前"></td>' +
-          '<td><div class="ph-swatches" role="group" aria-label="' + esc(p.label) + ' の色">' +
-            PHASE_COLORS.map(function (c) {
-              return '<button type="button" class="ph-sw ph-' + c.id + (c.id === p.color ? ' is-on' : '') +
-                     '" data-color="' + c.id + '" title="' + c.label + '" aria-label="' + c.label + '"' +
-                     (c.id === p.color ? ' aria-pressed="true"' : ' aria-pressed="false"') + '></button>';
-            }).join('') +
-          '</div></td>' +
-          '<td class="ph-count">' + n + '件</td>' +
-          '<td><button type="button" class="l2-del" data-del-phase aria-label="この区分を消す">×</button></td>' +
-        '</tr>';
+            return '<tr data-i="' + i + '">' +
+              '<td><input type="text" data-ph="label" value="' + esc(p.label) + '" placeholder="区分の名前"></td>' +
+              '<td><div class="ph-swatches" role="group" aria-label="' + esc(p.label) + ' の色">' +
+                PHASE_COLORS.map(function (c) {
+                  return '<button type="button" class="ph-sw ph-' + c.id + (c.id === p.color ? ' is-on' : '') +
+                         '" data-color="' + c.id + '" title="' + c.label + '" aria-label="' + c.label + '"' +
+                         (c.id === p.color ? ' aria-pressed="true"' : ' aria-pressed="false"') + '></button>';
+                }).join('') +
+              '</div></td>' +
+              '<td class="ph-count">' + usedBy(p.id) + '件</td>' +
+              '<td><button type="button" class="l2-del" data-del-phase aria-label="この区分を消す">×</button></td>' +
+            '</tr>';
           }).join('')
         : '<tr class="l2-none"><td colspan="4">区分がありません。' +
           '「区分を足す」から作ると、作業に色を付けられます。</td></tr>';
@@ -466,16 +620,67 @@
       panel.querySelector('[data-total]').textContent = total;
       panel.querySelector('[data-meter]').style.width = (total ? done / total * 100 : 0) + '%';
 
-      pbody.querySelectorAll('tr').forEach(function (tr) {
+      mbody.querySelectorAll('tr[data-i]').forEach(function (tr) {
+        var m = state.members[+tr.dataset.i];
+        if (m) tr.querySelector('.ph-count').textContent = heldBy(m.id) + '件';
+      });
+      pbody.querySelectorAll('tr[data-i]').forEach(function (tr) {
         var p = state.phases[+tr.dataset.i];
         if (p) tr.querySelector('.ph-count').textContent = usedBy(p.id) + '件';
       });
+      dbody.querySelectorAll('tr[data-i]').forEach(function (tr) {
+        var t = state.tasks[+tr.dataset.i];
+        if (!t) return;
+        tr.querySelector('.dt-name').textContent = t.name || '（名前なし）';
+        tr.children[1].innerHTML = priChip(t.priority);
+      });
 
+      renderByMember();
       renderGantt();
       io.sync();
     }
 
-    /* ---- ガント図 ---- */
+    /* ---- 担当者ごとの担当項目 ---- */
+
+    function renderByMember() {
+      var box = panel.querySelector('[data-by-member]');
+      var groups = state.members.map(function (m) {
+        return { key: m.id, name: m.name || '（名前なし）',
+                 tasks: state.tasks.filter(function (t) { return t.assignee === m.id; }) };
+      });
+      var none = state.tasks.filter(function (t) { return !t.assignee; });
+      if (none.length) groups.push({ key: '', name: '未割当', tasks: none });
+
+      if (!groups.length) {
+        box.innerHTML = '<p class="l2-empty">担当者を登録して作業に割り当てると、ここに一覧が出ます。</p>';
+        return;
+      }
+
+      box.innerHTML = '<div class="by-member">' + groups.map(function (g) {
+        var doneN = g.tasks.filter(function (t) { return t.status === 'done'; }).length;
+        return '<div class="bm-card' + (g.key ? '' : ' is-none') + '">' +
+          '<p class="bm-head"><b>' + esc(g.name) + '</b>' +
+            '<span class="bm-count">' + g.tasks.length + '件' +
+            (g.tasks.length ? '（完了 ' + doneN + '）' : '') + '</span></p>' +
+          (g.tasks.length
+            ? '<ul class="bm-list">' + g.tasks.map(function (t) {
+                return '<li class="is-' + t.status + '">' + priChip(t.priority) +
+                       '<span class="bm-name">' + esc(t.name || '（名前なし）') + '</span>' +
+                       '<span class="bm-when">' + esc(rangeLabel(t) || '—') + '</span></li>';
+              }).join('') + '</ul>'
+            : '<p class="bm-empty">受け持ちなし</p>') +
+        '</div>';
+      }).join('') + '</div>';
+    }
+
+    function rangeLabel(t) {
+      var a = mIndex(t.from), b = mIndex(t.to);
+      if (a === null || b === null || b < a) return '';
+      return a === b ? mLabel(a, true)
+                     : mLabel(a, true) + '〜' + mLabel(b, Math.floor(a / 12) !== Math.floor(b / 12));
+    }
+
+    /* ---- ガント図（項目名だけを出す） ---- */
 
     function renderGantt() {
       var ok = state.tasks.filter(function (t) {
@@ -508,23 +713,26 @@
 
       var rows = state.tasks.map(function (t) {
         var a = mIndex(t.from), b = mIndex(t.to);
+        var name = '<span class="gt-name">' + esc(t.name || '（名前なし）') + '</span>';
+
         if (a === null || b === null || b < a) {
-          return '<div class="gt-row is-' + t.status + '">' +
-                 '<span class="gt-name">' + esc(t.name || '（名前なし）') + '</span>' +
+          return '<div class="gt-row is-' + t.status + '">' + name +
                  '<span class="gt-track"><span class="gt-blank">年月を入れてください</span></span></div>';
         }
         var left  = (a - min) / span * 100;
         var width = (b - a + 1) / span * 100;
-        var label = a === b ? mLabel(a, true) : mLabel(a, true) + '〜' + mLabel(b, Math.floor(a / 12) !== Math.floor(b / 12));
+        var label = rangeLabel(t);
 
         // 幅が足りないラベルはバーの外へ。右端に寄るものは左側に出す
         var place = width >= 30 ? ' class="inside"' : (left + width > 62 ? ' class="before"' : '');
+        var who = memberName(t.assignee);
 
-        return '<div class="gt-row is-' + t.status + '">' +
-          '<span class="gt-name">' + esc(t.name || '（名前なし）') + '</span>' +
+        return '<div class="gt-row is-' + t.status + '">' + name +
           '<span class="gt-track"><span class="gt-bar ph-' + esc(phaseOf(t.phase).color) + '" ' +
             'style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%" ' +
-            'title="' + esc(t.name) + ' ' + label + '"><span' + place + '>' + label + '</span></span></span>' +
+            'title="' + esc(t.name) + ' ' + label + (who ? '／担当 ' + esc(who) : '') +
+            '／優先度 ' + priorityOf(t.priority).label + '"' +
+            '><span' + place + '>' + label + '</span></span></span>' +
         '</div>';
       }).join('');
 
@@ -547,8 +755,7 @@
                 return '<span style="left:' + t.at.toFixed(2) + '%">' + t.text + '</span>';
               }).join('') +
             '</span></div>' + rows +
-          '</div>' +
-          legend +
+          '</div>' + legend +
         '</figure>';
     }
 
@@ -557,27 +764,40 @@
     function applyInput(el) {
       var row = el.closest('tr');
       if (!row) return;
+      var i = +row.dataset.i;
 
       if (el.dataset.t) {
-        var t = state.tasks[+row.dataset.i];
+        var t = state.tasks[i];
         if (!t) return;
         if (el.dataset.t === 'status' && el.value !== t.status) {
           t.at = el.value === 'todo' ? '' : today();
         }
         t[el.dataset.t] = el.value;
-        persist();
+        if (el.dataset.t === 'priority') el.dataset.pri = el.value;
+        touch();
         paint();
         return;
       }
 
       if (el.dataset.ph) {
-        var p = state.phases[+row.dataset.i];
+        var p = state.phases[i];
         if (!p) return;
         p[el.dataset.ph] = el.value;
-        persist();
-        // 区分名は作業側の選択肢にも出るので、そちらも書き換える
+        touch();
         tbody.querySelectorAll('[data-t="phase"] option[value="' + p.id + '"]').forEach(function (o) {
           o.textContent = p.label || '（名前なし）';
+        });
+        paint();
+        return;
+      }
+
+      if (el.dataset.m) {
+        var m = state.members[i];
+        if (!m) return;
+        m[el.dataset.m] = el.value;
+        touch();
+        tbody.querySelectorAll('[data-t="assignee"] option[value="' + m.id + '"]').forEach(function (o) {
+          o.textContent = m.name || '（名前なし）';
         });
         paint();
       }
@@ -602,14 +822,15 @@
           b.classList.toggle('is-on', on);
           b.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
-        persist();
+        touch();
         paint();
         return;
       }
 
       if (btn.hasAttribute('data-add-task')) {
-        state.tasks.push({ id: 'task-' + Date.now(), name: '', from: '', to: '',
-                           phase: state.phases.length ? state.phases[0].id : '', status: 'todo', at: '' });
+        state.tasks.push({ id: 'task-' + Date.now(), name: '', detail: '', from: '', to: '',
+                           phase: state.phases.length ? state.phases[0].id : '',
+                           assignee: '', priority: 'mid', status: 'todo', at: '' });
       } else if (btn.hasAttribute('data-del-task')) {
         state.tasks.splice(+btn.closest('tr').dataset.i, 1);
       } else if (btn.hasAttribute('data-add-phase')) {
@@ -625,16 +846,36 @@
                           '\n\nよろしいですか？')) return;
         state.tasks.forEach(function (t) { if (t.phase === gone.id) t.phase = next ? next.id : ''; });
         state.phases = state.phases.filter(function (p) { return p !== gone; });
+      } else if (btn.hasAttribute('data-add-member')) {
+        state.members.push({ id: 'mem-' + Date.now(), name: '' });
+      } else if (btn.hasAttribute('data-del-member')) {
+        var goneM = state.members[+btn.closest('tr').dataset.i];
+        if (!goneM) return;
+        var held = heldBy(goneM.id);
+        if (held && !confirm('「' + (goneM.name || '名前なし') + '」が受け持つ作業が' + held + '件あります。\n' +
+                             'それらは未割当になります。\n\nよろしいですか？')) return;
+        state.tasks.forEach(function (t) { if (t.assignee === goneM.id) t.assignee = ''; });
+        state.members = state.members.filter(function (m) { return m !== goneM; });
       } else if (btn.hasAttribute('data-clear-tasks')) {
         if (!state.tasks.length) return;
-        if (!confirm('作業を' + state.tasks.length + '件すべて削除します。進捗も消えます。\n' +
-                     '（区分は残ります）\n\nよろしいですか？')) return;
+        if (!confirm('作業を' + state.tasks.length + '件すべて削除します。内容と進捗も消えます。\n' +
+                     '（担当者と区分は残ります）\n\nよろしいですか？')) return;
         state.tasks = [];
+      } else if (btn.hasAttribute('data-clear-members')) {
+        if (!state.members.length) return;
+        var knownM = {};
+        state.members.forEach(function (m) { knownM[m.id] = 1; });
+        var assigned = state.tasks.filter(function (t) { return knownM[t.assignee]; }).length;
+        if (!confirm('担当者を' + state.members.length + '人すべて削除します。\n' +
+                     (assigned ? '作業' + assigned + '件は未割当になります。\n' : '') +
+                     '（作業そのものは消えません）\n\nよろしいですか？')) return;
+        state.members = [];
+        state.tasks.forEach(function (t) { t.assignee = ''; });
       } else if (btn.hasAttribute('data-clear-phases')) {
         if (!state.phases.length) return;
-        var known = {};
-        state.phases.forEach(function (p) { known[p.id] = 1; });
-        var inUse = state.tasks.filter(function (t) { return known[t.phase]; }).length;
+        var knownP = {};
+        state.phases.forEach(function (p) { knownP[p.id] = 1; });
+        var inUse = state.tasks.filter(function (t) { return knownP[t.phase]; }).length;
         if (!confirm('区分を' + state.phases.length + '件すべて削除します。\n' +
                      (inUse ? '作業' + inUse + '件は区分なしになり、バーは同じ色になります。\n' : '') +
                      '（作業そのものは消えません）\n\nよろしいですか？')) return;
@@ -642,11 +883,243 @@
         state.tasks.forEach(function (t) { t.phase = ''; });
       } else return;
 
-      persist();
+      touch();
       rebuild();
     });
 
+    /* ---- 3人で共有する（GitHub のファイルに置く） ---- */
+
+    function buildShare() {
+      var el = document.createElement('div');
+      el.className = 'share';
+      el.innerHTML =
+        '<div class="share-bar">' +
+          '<span class="share-state" data-share-state>共有：確認中…</span>' +
+          '<span class="share-btns">' +
+            '<button type="button" data-share-pull>読み込む</button>' +
+            '<button type="button" data-share-push>保存して共有</button>' +
+          '</span>' +
+        '</div>' +
+        '<details class="share-conf">' +
+          '<summary>共有の設定<span class="chat-key-state" data-share-conf-state>未設定</span></summary>' +
+          '<p class="chat-key-note">' +
+            '3人で同じ予定を見るために、この内容を GitHub のファイルに置きます。' +
+            '中身はサイトと同じパスワードで暗号化してから置くので、' +
+            'リポジトリを見ても読めません。' +
+            '<br>保存するには GitHub のアクセストークンが必要です' +
+            '（このリポジトリの Contents に読み書きできるもの）。' +
+            'トークンはこの端末にだけ保存されます。' +
+          '</p>' +
+          '<label class="share-field"><span>あなたの名前</span>' +
+            '<input type="text" data-share-name placeholder="例）きょうすけ" spellcheck="false"></label>' +
+          '<label class="share-field"><span>アクセストークン</span>' +
+            '<input type="password" data-share-token placeholder="github_pat_… / ghp_…" spellcheck="false" autocomplete="off"></label>' +
+          '<div class="prog-io-btns">' +
+            '<button type="button" data-share-save>設定を保存</button>' +
+            '<button type="button" data-share-clear>トークンを消す</button>' +
+          '</div>' +
+          '<p class="prog-io-msg" data-share-msg role="status" aria-live="polite"></p>' +
+        '</details>';
+
+      var stateEl = el.querySelector('[data-share-state]');
+      var msgEl   = el.querySelector('[data-share-msg]');
+      var nameEl  = el.querySelector('[data-share-name]');
+      var tokenEl = el.querySelector('[data-share-token]');
+      var confEl  = el.querySelector('[data-share-conf-state]');
+
+      var token = '', myName = '', sha = null, dirty = false, remote = null;
+
+      try {
+        token  = localStorage.getItem(GH_TOKEN_KEY) || '';
+        myName = localStorage.getItem(MYNAME_KEY) || '';
+      } catch (e) {}
+      tokenEl.value = token;
+      nameEl.value = myName;
+
+      function confState() {
+        confEl.textContent = token ? '設定済み' : '未設定';
+        confEl.className = 'chat-key-state' + (token ? ' is-on' : '');
+      }
+      confState();
+
+      function msg(t) { msgEl.textContent = t; setTimeout(function () { msgEl.textContent = ''; }, 5000); }
+      function say(t, kind) {
+        stateEl.textContent = t;
+        stateEl.className = 'share-state' + (kind ? ' is-' + kind : '');
+      }
+
+      function headers(extra) {
+        var h = { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+        if (token) h.Authorization = 'Bearer ' + token;
+        if (extra) Object.keys(extra).forEach(function (k) { h[k] = extra[k]; });
+        return h;
+      }
+      function apiUrl() {
+        return 'https://api.github.com/repos/' + preset.share.repo + '/contents/' + preset.share.path;
+      }
+
+      function describe(r) {
+        return '共有：' + (r ? (r.savedBy ? r.savedBy + 'さんが' : '') + (r.savedAt || '') + ' に保存'
+                            : 'まだありません');
+      }
+
+      // 共有ファイルを取り出して復号する
+      function fetchRemote() {
+        return fetch(apiUrl() + '?ref=' + encodeURIComponent(preset.share.branch) + '&t=' + Date.now(),
+                     { headers: headers(), cache: 'no-store' })
+          .then(function (res) {
+            if (res.status === 404) { sha = null; return null; }
+            if (!res.ok) throw new Error(ghError(res.status));
+            return res.json().then(function (j) {
+              sha = j.sha;
+              var raw = atob(String(j.content || '').replace(/\s/g, ''));
+              var bytes = new Uint8Array(raw.length);
+              for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+              var env = JSON.parse(new TextDecoder().decode(bytes));
+              return decryptBlob(sessionPassword(), env).then(function (text) {
+                var body = JSON.parse(text);
+                return { savedBy: env.savedBy || '', savedAt: env.savedAt || '', data: body };
+              });
+            });
+          });
+      }
+
+      // fetch そのものが失敗したときは「Failed to fetch」しか出ないので言い換える
+      function netError(err) {
+        var m = err && err.message ? err.message : String(err);
+        return /failed to fetch|networkerror|load failed/i.test(m)
+          ? 'ネットにつながらないか、GitHubに届きませんでした' : m;
+      }
+
+      function ghError(status) {
+        if (status === 401) return 'トークンが正しくないようです（401）';
+        if (status === 403) return 'このトークンでは書き込めません（403）。権限を確認してください';
+        if (status === 409) return 'ほかの人が先に保存しています（409）';
+        if (status === 404) return '共有ファイルが見つかりません（404）';
+        return 'GitHub でエラー（' + status + '）';
+      }
+
+      function applyRemote(r) {
+        remote = r;
+        state = normalize(r.data);
+        writeStore(SCHEDULE_KEY, state);
+        dirty = false;
+        rebuild();
+        say(describe(r), 'ok');
+      }
+
+      function pull(quiet) {
+        say('共有：読み込み中…');
+        return fetchRemote().then(function (r) {
+          if (!r) { remote = null; say('共有：まだありません。「保存して共有」で作られます'); return; }
+          if (quiet && dirty) {
+            remote = r;
+            say(describe(r) + '｜この端末に未保存の変更があります', 'warn');
+            return;
+          }
+          applyRemote(r);
+        }).catch(function (err) {
+          say('共有：読み込めませんでした（' + netError(err) + '）', 'warn');
+        });
+      }
+
+      function push() {
+        if (!token) {
+          el.querySelector('.share-conf').open = true;
+          msg('先にアクセストークンを設定してください');
+          tokenEl.focus();
+          return;
+        }
+        var pw = sessionPassword();
+        if (!pw) { msg('パスワードが取り出せません。読み込み直してください'); return; }
+
+        say('共有：保存中…');
+        var stamp = stampNow();
+        return encryptText(pw, JSON.stringify(state)).then(function (blob) {
+          blob.savedBy = myName || '（名前なし）';
+          blob.savedAt = stamp;
+          var body = {
+            message: '予定を更新（' + blob.savedBy + '）',
+            content: utf8ToB64(JSON.stringify(blob)),
+            branch: preset.share.branch
+          };
+          if (sha) body.sha = sha;
+          return fetch(apiUrl(), { method: 'PUT', headers: headers({ 'Content-Type': 'application/json' }),
+                                   body: JSON.stringify(body) });
+        }).then(function (res) {
+          if (res.status === 409 || res.status === 422) {
+            return fetchRemote().then(function (r) {
+              remote = r;
+              say('共有：ほかの人が先に保存しています。読み込んでから、もう一度保存してください', 'warn');
+            });
+          }
+          if (!res.ok) throw new Error(ghError(res.status));
+          return res.json().then(function (j) {
+            sha = j.content && j.content.sha;
+            dirty = false;
+            remote = { savedBy: myName || '（名前なし）', savedAt: stamp };
+            say(describe(remote), 'ok');
+            msg('共有しました');
+          });
+        }).catch(function (err) {
+          say('共有：保存できませんでした（' + netError(err) + '）', 'warn');
+        });
+      }
+
+      el.querySelector('[data-share-pull]').addEventListener('click', function () {
+        if (dirty && !confirm('この端末の変更は、共有側の内容で上書きされます。よろしいですか？')) return;
+        dirty = false;
+        pull(false);
+      });
+      el.querySelector('[data-share-push]').addEventListener('click', function () { push(); });
+
+      el.querySelector('[data-share-save]').addEventListener('click', function () {
+        token = tokenEl.value.trim();
+        myName = nameEl.value.trim();
+        try {
+          if (token) localStorage.setItem(GH_TOKEN_KEY, token); else localStorage.removeItem(GH_TOKEN_KEY);
+          localStorage.setItem(MYNAME_KEY, myName);
+        } catch (e) {}
+        confState();
+        msg('保存しました');
+      });
+
+      el.querySelector('[data-share-clear]').addEventListener('click', function () {
+        token = '';
+        tokenEl.value = '';
+        try { localStorage.removeItem(GH_TOKEN_KEY); } catch (e) {}
+        confState();
+        msg('消しました');
+      });
+
+      return {
+        el: el,
+        markDirty: function () {
+          dirty = true;
+          say(describe(remote) + '｜未保存の変更があります', 'warn');
+        },
+        start: function () { pull(true); }
+      };
+    }
+
     rebuild();
+    share.start();
+  }
+
+  function stampNow() {
+    var d = new Date();
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '/' + p2(d.getMonth() + 1) + '/' + p2(d.getDate()) +
+           ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+  }
+
+  function utf8ToB64(str) {
+    var bytes = new TextEncoder().encode(str);
+    var out = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(out);
   }
 
   /* ----------------------------------------------------- 小さな道具 */
