@@ -227,9 +227,10 @@
 
   // 見出しを押すとその章を畳む。開いている / 閉じているは端末ごとに憶えておく。
   var FOLD_KEY = 'nanoni.folded.v1';
-  var folded = {};        // ページごとに { 章のid: true }
+  var folded = {};        // ページごとに { 章・小見出しのid: true }
   var foldSaved = null;   // 検索で一時的に開けたときの、元の状態
   var foldLabel = null;   // 「すべて閉じる / すべて開く」の書き換え
+  var subWraps = [];      // 小見出しごとの畳み（スケジュールのページだけ）
 
   function foldStore() {
     var all = readStore(FOLD_KEY, {});
@@ -257,14 +258,77 @@
     saveFold();
   }
 
+  function setSub(wrap, on, remember) {
+    wrap.classList.toggle('is-folded', on);
+    var btn = wrap.querySelector('h3 .sec-toggle');
+    if (btn) btn.setAttribute('aria-expanded', on ? 'false' : 'true');
+    if (remember === false) return;
+    if (on) folded[wrap.dataset.foldSub] = true; else delete folded[wrap.dataset.foldSub];
+    saveFold();
+  }
+
   // 目次や検索から飛ぶとき、閉じたままだと何も見えない。
-  // その章と、それを含む章を開ける。
+  // その小見出し・章と、それを含むものを開ける。
   function revealSection(el) {
-    var sec = el && el.closest ? el.closest('section') : null;
+    if (!el || !el.closest) return;
+
+    var sub = el.closest('.fold-sub');
+    while (sub) {
+      if (sub.classList.contains('is-folded')) setSub(sub, false);
+      sub = sub.parentElement ? sub.parentElement.closest('.fold-sub') : null;
+    }
+
+    var sec = el.closest('section');
     while (sec) {
       if (sec.classList.contains('is-folded')) setFolded(sec, false);
       sec = sec.parentElement ? sec.parentElement.closest('section') : null;
     }
+  }
+
+  // 小見出し（h3）ごとにも畳めるようにする。長いスケジュールのページだけ。
+  function initSubFold(sec) {
+    var body = sec.querySelector('.sec-body');
+    if (!body) return;
+
+    // 入れ子の章（編集）の中身は、その章を回すときに扱う
+    var h3s = Array.prototype.filter.call(body.querySelectorAll('h3'), function (h) {
+      return h.closest('section') === sec;
+    });
+
+    h3s.forEach(function (h3) {
+      if (!h3.id) return;
+
+      var wrap = document.createElement('div');
+      wrap.className = 'fold-sub';
+      wrap.dataset.foldSub = h3.id;
+      h3.parentNode.insertBefore(wrap, h3);
+      wrap.appendChild(h3);
+
+      // 次の小見出しの手前までが、この小見出しの中身
+      var subBody = document.createElement('div');
+      subBody.className = 'fold-sub-body';
+      subBody.id = h3.id + '-body';
+      while (wrap.nextSibling && wrap.nextSibling.tagName !== 'H3') {
+        subBody.appendChild(wrap.nextSibling);
+      }
+      wrap.appendChild(subBody);
+
+      h3.classList.add('is-foldable');
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sec-toggle';
+      btn.setAttribute('aria-controls', subBody.id);
+      while (h3.firstChild) btn.appendChild(h3.firstChild);
+      btn.insertAdjacentHTML('beforeend', '<span class="sec-caret" aria-hidden="true"></span>');
+      h3.appendChild(btn);
+
+      btn.addEventListener('click', function () {
+        setSub(wrap, !wrap.classList.contains('is-folded'));
+      });
+
+      setSub(wrap, !!folded[h3.id], false);
+      subWraps.push(wrap);
+    });
   }
 
   function initFold() {
@@ -299,6 +363,9 @@
       setFolded(sec, !!folded[sec.id], false);
     });
 
+    // スケジュールは1つの章が長いので、小見出しごとにも畳めるようにする
+    if (MODE === 'schedule') secs.forEach(initSubFold);
+
     // 章が1つしかないページ（第2ロット・AIに質問）では「すべて」に意味が無い
     if (secs.length > 1) buildFoldAll(secs);
   }
@@ -320,6 +387,7 @@
     btn.addEventListener('click', function () {
       var open = allFolded();
       secs.forEach(function (s) { setFolded(s, !open); });
+      subWraps.forEach(function (w) { setSub(w, !open); });
       if (open) return;
       // 全部閉じたら、いま見ている位置が本文の途中だと宙に浮くので先頭へ
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -601,7 +669,10 @@
         '<button type="button" class="is-danger" data-clear-members>全て削除する</button>' +
       '</div>';
 
-    docEl.querySelector('#schedule').appendChild(panel);
+    // 「今後のスケジュール」の中ではなく、その次に置く。
+    // 中に入れると、上の章を畳んだときに「編集」ごと消えてしまう。
+    var sched = docEl.querySelector('#schedule');
+    sched.parentNode.insertBefore(panel, sched.nextSibling);
 
     // 共有は「押すもの」なので編集の側に置き、状態バーと設定を続けて並べる
     var share = buildShare();
@@ -1091,13 +1162,13 @@
     /* ================================================== 共有 ============= */
 
     function buildShare() {
+      // 状態の欄は、言うことがあるときだけ出す。
+      // うまくいっているとき・トークンを入れていないときは何も出さない。
       var bar = document.createElement('div');
       bar.className = 'share';
+      bar.hidden = true;
       bar.innerHTML =
-        '<div class="share-bar">' +
-          '<span class="share-state" data-share-state>共有：確認中…</span>' +
-          '<span class="share-btns"><button type="button" data-share-now>今すぐ同期</button></span>' +
-        '</div>';
+        '<div class="share-bar"><span class="share-state" data-share-state></span></div>';
 
       var conf = document.createElement('details');
       conf.className = 'share-conf';
@@ -1119,6 +1190,7 @@
         '<div class="prog-io-btns">' +
           '<button type="button" data-share-save>設定を保存</button>' +
           '<button type="button" data-share-clear>トークンを消す</button>' +
+          '<button type="button" data-share-now>今すぐ同期</button>' +
         '</div>' +
         '<p class="prog-io-msg" data-share-msg role="status" aria-live="polite"></p>';
 
@@ -1146,15 +1218,14 @@
       confState();
 
       function msg(t) { msgEl.textContent = t; setTimeout(function () { msgEl.textContent = ''; }, 5000); }
+      // 空文字を渡すと欄ごと消える
       function say(t, kind) {
+        bar.hidden = !t;
         stateEl.textContent = t;
         stateEl.className = 'share-state' + (kind ? ' is-' + kind : '');
       }
-      function idle() {
-        if (!token) { say('共有：トークン未設定 — この端末にだけ残ります', 'warn'); return; }
-        say('共有：自動' + (remote ? '（' + (remote.savedBy ? remote.savedBy + 'さん ' : '') +
-                                     remote.savedAt + ' に反映）' : ''), 'ok');
-      }
+      // 待っているだけのときは黙っている。うまくいっている報告も要らない。
+      function idle() { say(''); }
 
       function headers(extra) {
         var h = { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
@@ -1289,7 +1360,6 @@
       function push(text) {
         var pw = sessionPassword();
         if (!pw) { say('共有：パスワードが取り出せません', 'warn'); return; }
-        say('共有：送信中…');
         var stamp = stampNow();
         return Promise.all([encryptText(pw, text), ensureSha()]).then(function (r) {
           var blob = r[0];
@@ -1320,7 +1390,7 @@
         });
       }
 
-      bar.querySelector('[data-share-now]').addEventListener('click', function () { sync(true); });
+      conf.querySelector('[data-share-now]').addEventListener('click', function () { sync(true); });
 
       conf.querySelector('[data-share-save]').addEventListener('click', function () {
         token = tokenEl.value.trim();
@@ -1348,7 +1418,6 @@
         conf: conf,
         // 書き換えのたびに呼ばれる。連打しても数秒に1回だけ送る
         queue: function () {
-          say('共有：まもなく反映します…');
           clearTimeout(pushTimer);
           pushTimer = setTimeout(function () { sync(false); }, 2500);
         },
@@ -2390,7 +2459,11 @@
       sections.forEach(function (s) {
         var hit = s.textContent.toLowerCase().indexOf(needle) !== -1;
         s.classList.toggle('filtered-out', !hit);
-        if (hit) { matched++; setFolded(s, false, false); highlight(s, q); }
+        if (!hit) return;
+        matched++;
+        setFolded(s, false, false);
+        s.querySelectorAll('.fold-sub').forEach(function (w) { setSub(w, false, false); });
+        highlight(s, q);
       });
 
       var visibleIds = sections
@@ -2414,6 +2487,7 @@
     function restoreFold() {
       if (!foldSaved) return;
       sections.forEach(function (s) { setFolded(s, !!foldSaved[s.id], false); });
+      subWraps.forEach(function (w) { setSub(w, !!foldSaved[w.dataset.foldSub], false); });
       folded = foldSaved;
       foldSaved = null;
       saveFold();

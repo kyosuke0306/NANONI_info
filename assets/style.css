@@ -546,6 +546,14 @@ h2 {
 .is-folded { margin-bottom: 18px; }        /* 閉じた章どうしは詰めて並べる */
 .is-folded > h2 { margin-bottom: 0; }
 
+/* 小見出し（h3）ごとの畳み。スケジュールのページだけ使う */
+h3.is-foldable { display: flex; align-items: center; }
+h3.is-foldable .sec-toggle { flex: 1; min-width: 0; }
+h3.is-foldable .sec-caret { width: 8px; height: 8px; }
+
+.fold-sub.is-folded > .fold-sub-body { display: none; }
+.fold-sub.is-folded > h3 { margin-bottom: 0; }
+
 .fold-all { display: flex; justify-content: flex-end; margin: 0 0 18px; }
 .fold-all button {
   padding: 7px 15px;
@@ -562,7 +570,7 @@ h2 {
 /* 印刷のときは閉じていても全部出す（紙は畳めない） */
 @media print {
   .fold-all, .sec-caret { display: none; }
-  .is-folded > .sec-body { display: block; }
+  .is-folded > .sec-body, .fold-sub.is-folded > .fold-sub-body { display: block; }
 }
 
 h3 {
@@ -1840,8 +1848,8 @@ h3::before {
 
 /* --- 3人で共有する --- */
 
-.share { margin: 16px 0 0; }          /* すぐ下に .share-conf が続く */
-.share-conf { margin-bottom: 22px; }
+/* 状態の欄はふだん出ないので、設定の箱とは切り離して単体で成り立たせる */
+.share { margin: 16px 0 10px; }
 
 .share-bar {
   display: flex;
@@ -1852,42 +1860,18 @@ h3::before {
   padding: 11px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius) var(--radius) 0 0;
+  border-radius: var(--radius);
 }
 .share-state { font-size: 12.5px; color: var(--ink-2); }
 .share-state.is-ok   { color: var(--green); }
 .share-state.is-warn { color: var(--amber); font-weight: 700; }
 
-.share-btns { display: flex; gap: 8px; }
-.share-btns button {
-  padding: 7px 14px;
-  font-size: 12.5px;
-  font-family: var(--sans);
-  color: var(--ink-2);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  cursor: pointer;
-}
-.share-btns button:hover { border-color: var(--accent); color: var(--accent); }
-.share-btns button[data-share-push] {
-  font-weight: 700;
-  color: #fff;
-  background: #2f2a22;
-  border-color: #2f2a22;
-}
-.share-btns button[data-share-push]:hover { color: #fff; background: #443c30; border-color: #443c30; }
-@media (prefers-color-scheme: dark) {
-  .share-btns button[data-share-push] { color: #1a190f; background: var(--accent); border-color: var(--accent); }
-  .share-btns button[data-share-push]:hover { color: #1a190f; background: var(--accent); border-color: var(--accent); }
-}
-
 .share-conf {
+  margin: 16px 0 22px;
   padding: 11px 14px;
   background: var(--bg-tint);
   border: 1px solid var(--line);
-  border-top: 0;
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--radius);
   font-size: 13px;
 }
 .share-conf > summary { cursor: pointer; font-weight: 700; font-size: 12.5px; }
@@ -1904,11 +1888,6 @@ h3::before {
   border-radius: 7px;
 }
 .share-field input:focus { outline: 0; border-color: var(--accent); }
-
-@media (max-width: 560px) {
-  .share-btns { width: 100%; }
-  .share-btns button { flex: 1; }
-}
 
 @media print {
   .share, .share-conf { display: none; }
