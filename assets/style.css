@@ -1496,6 +1496,133 @@ h3::before {
 .detail-table .dt-name { font-weight: 700; font-size: 13px; }
 .detail-table td { vertical-align: top; padding-top: 11px; }
 
+/* --- 上に出す一覧（見るだけ） --- */
+
+.view-table { min-width: 760px; }
+.view-table td { vertical-align: top; font-weight: 400; }
+.view-table .vt-name { font-weight: 700; }
+.view-table .vt-who,
+.view-table .vt-when { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.view-table .vt-when { font-variant-numeric: tabular-nums; }
+.view-table .vt-none { color: var(--muted); }
+.view-table tr.is-done .vt-name { color: var(--muted); text-decoration: line-through; }
+
+.vt-detail { margin: 0; font-size: 13px; line-height: 1.75; }
+.vt-subhead {
+  margin: 8px 0 3px;
+  font-size: 10.5px;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.vt-subs { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.vt-subs li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.vt-subs li::before {
+  content: "○";
+  position: absolute;
+  left: 2px;
+  color: var(--muted);
+}
+.vt-subs li.is-done { color: var(--muted); text-decoration: line-through; }
+.vt-subs li.is-done::before { content: "✓"; color: var(--green); text-decoration: none; }
+
+/* 状態のしるし */
+.st {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.st-todo  { color: var(--muted); background: var(--bg-tint); }
+.st-doing { color: var(--amber); background: var(--amber-bg); }
+.st-done  { color: var(--green); background: var(--green-bg); }
+
+/* --- 作業の細分化（下で直す） --- */
+
+.split-card {
+  padding: 14px 16px;
+  margin-top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.split-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 10px;
+}
+.split-head b { font-size: 14px; }
+
+.split-detail { display: grid; gap: 4px; }
+.split-detail > span { font-size: 11px; letter-spacing: .06em; color: var(--muted); }
+.split-detail textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  resize: vertical;
+}
+.split-detail textarea:focus { outline: 0; border-color: var(--accent); }
+
+.split-subs { list-style: none; margin: 11px 0 0; padding: 0; display: grid; gap: 6px; }
+.split-subs li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.split-subs input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--green); }
+.split-subs input[type="text"] {
+  min-width: 0;
+  padding: 6px 9px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.split-subs input[type="text"]:focus { outline: 0; border-color: var(--accent); }
+.split-subs li:has(input[type="checkbox"]:checked) input[type="text"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.split-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.split-actions button {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--sans);
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.split-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.split-count { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ガントの担当名 */
+.gt-name small { display: block; color: var(--muted); font-size: 10.5px; }
+
+@media print {
+  .split-card, .prog-table, .member-table, .phase-table { display: none; }
+}
+
 /* --- 優先度 --- */
 
 .pri {
