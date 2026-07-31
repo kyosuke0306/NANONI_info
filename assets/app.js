@@ -496,9 +496,11 @@
 
     docEl.querySelector('#schedule').appendChild(panel);
 
+    // 共有は「押すもの」なので編集の側に置き、状態バーと設定を続けて並べる
     var share = buildShare();
-    docEl.querySelector('#schedule').insertBefore(share.el, host);
-    panel.appendChild(share.conf);
+    var summary = panel.querySelector('.prog-summary');
+    panel.insertBefore(share.el, summary);
+    panel.insertBefore(share.conf, summary);
 
     var io = ioPanel(function () { return state; },
                      function (next) { state = normalize(next); touch(); rebuild(); },

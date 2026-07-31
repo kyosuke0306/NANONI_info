@@ -1778,7 +1778,8 @@ h3::before {
 
 /* --- 3人で共有する --- */
 
-.share { margin: 18px 0 22px; }
+.share { margin: 16px 0 0; }          /* すぐ下に .share-conf が続く */
+.share-conf { margin-bottom: 22px; }
 
 .share-bar {
   display: flex;
