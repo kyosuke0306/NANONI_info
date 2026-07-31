@@ -791,15 +791,22 @@
       var span = max - min + 1;
       var step = Math.max(1, Math.ceil(span / 4));
 
+      // 目盛りを置く位置。右端はかならず要るが、その手前が近すぎると
+      // 文字どうしが重なって読めなくなるので、近いほうを落としてから端を足す。
+      var at = [];
+      for (var i = 0; i <= span; i += step) at.push(i);
+      if (at[at.length - 1] < span) {
+        if (span - at[at.length - 1] < step * 0.6) at.pop();
+        at.push(span);
+      }
+
       var ticks = [], lastYear = null;
-      function tick(i) {
+      at.forEach(function (i) {
         var idx = min + i;
         var year = Math.floor(idx / 12);
         ticks.push({ at: i / span * 100, text: mLabel(idx, year !== lastYear) });
         lastYear = year;
-      }
-      for (var i = 0; i <= span; i += step) tick(i);
-      if (ticks[ticks.length - 1].at < 100) tick(span);
+      });
 
       var html = rows.map(function (r) {
         var cls = 'gt-row is-' + r.status + (r.kind === 'sub' ? ' is-sub' : '');
