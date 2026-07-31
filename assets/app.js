@@ -216,10 +216,117 @@
     stampBuildDate();
     wrapWideTables();
     buildToc();
+    initFold();          // 章の開け閉め。id が要るので buildToc のあと
     initScrollSpy();
     initSearch();
     initToTop();
     initNav();
+  }
+
+  /* ------------------------------------------------- 章の開け閉め */
+
+  // 見出しを押すとその章を畳む。開いている / 閉じているは端末ごとに憶えておく。
+  var FOLD_KEY = 'nanoni.folded.v1';
+  var folded = {};        // ページごとに { 章のid: true }
+  var foldSaved = null;   // 検索で一時的に開けたときの、元の状態
+  var foldLabel = null;   // 「すべて閉じる / すべて開く」の書き換え
+
+  function foldStore() {
+    var all = readStore(FOLD_KEY, {});
+    return (all && typeof all[MODE] === 'object' && all[MODE]) ? all[MODE] : {};
+  }
+  function saveFold() {
+    var all = readStore(FOLD_KEY, {});
+    all[MODE] = folded;
+    writeStore(FOLD_KEY, all);
+  }
+
+  function foldable() {
+    return Array.prototype.filter.call(docEl.querySelectorAll('section'), function (s) {
+      return s.querySelector(':scope > h2');
+    });
+  }
+
+  function setFolded(sec, on, remember) {
+    sec.classList.toggle('is-folded', on);
+    var btn = sec.querySelector(':scope > h2 .sec-toggle');
+    if (btn) btn.setAttribute('aria-expanded', on ? 'false' : 'true');
+    if (foldLabel) foldLabel();
+    if (remember === false) return;
+    if (on) folded[sec.id] = true; else delete folded[sec.id];
+    saveFold();
+  }
+
+  // 目次や検索から飛ぶとき、閉じたままだと何も見えない。
+  // その章と、それを含む章を開ける。
+  function revealSection(el) {
+    var sec = el && el.closest ? el.closest('section') : null;
+    while (sec) {
+      if (sec.classList.contains('is-folded')) setFolded(sec, false);
+      sec = sec.parentElement ? sec.parentElement.closest('section') : null;
+    }
+  }
+
+  function initFold() {
+    var secs = foldable();
+    if (!secs.length) return;
+
+    folded = foldStore();
+
+    secs.forEach(function (sec) {
+      var h2 = sec.querySelector(':scope > h2');
+
+      // 見出しより下を1つの入れ物にまとめ、それごと隠す
+      var body = document.createElement('div');
+      body.className = 'sec-body';
+      body.id = sec.id + '-body';
+      while (h2.nextSibling) body.appendChild(h2.nextSibling);
+      sec.appendChild(body);
+
+      // 見出しの中身をボタンにする（h2 のままなので目次や読み上げは変わらない）
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sec-toggle';
+      btn.setAttribute('aria-controls', body.id);
+      while (h2.firstChild) btn.appendChild(h2.firstChild);
+      btn.insertAdjacentHTML('beforeend', '<span class="sec-caret" aria-hidden="true"></span>');
+      h2.appendChild(btn);
+
+      btn.addEventListener('click', function () {
+        setFolded(sec, !sec.classList.contains('is-folded'));
+      });
+
+      setFolded(sec, !!folded[sec.id], false);
+    });
+
+    // 章が1つしかないページ（第2ロット・AIに質問）では「すべて」に意味が無い
+    if (secs.length > 1) buildFoldAll(secs);
+  }
+
+  // 「すべて閉じる / すべて開く」。1つずつ押さなくても済むように。
+  function buildFoldAll(secs) {
+    var bar = document.createElement('div');
+    bar.className = 'fold-all';
+    bar.innerHTML = '<button type="button" data-fold-all></button>';
+    var btn = bar.querySelector('button');
+
+    function allFolded() {
+      return secs.every(function (s) { return s.classList.contains('is-folded'); });
+    }
+
+    // 章を1つ閉じただけでも表示を合わせる（setFolded から呼ばれる）
+    foldLabel = function () { btn.textContent = allFolded() ? 'すべて開く' : 'すべて閉じる'; };
+
+    btn.addEventListener('click', function () {
+      var open = allFolded();
+      secs.forEach(function (s) { setFolded(s, !open); });
+      if (open) return;
+      // 全部閉じたら、いま見ている位置が本文の途中だと宙に浮くので先頭へ
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    foldLabel();
+    docEl.insertBefore(bar, docEl.firstChild);
   }
 
   /* ------------------------------------------------- ページの振り分け */
@@ -2267,6 +2374,7 @@
       if (!q) {
         sections.forEach(function (s) { s.classList.remove('filtered-out'); });
         tocLinks.forEach(function (a) { a.parentElement.classList.remove('is-hidden'); });
+        restoreFold();
         removeEmptyNote();
         status.hidden = true;
         return;
@@ -2275,10 +2383,14 @@
       var needle = q.toLowerCase();
       var matched = 0;
 
+      // 閉じている章の中に見つかっても見えないので、探しているあいだは開ける。
+      // 元の開け閉めは憶えておいて、検索をやめたときに戻す。
+      if (!foldSaved) foldSaved = JSON.parse(JSON.stringify(folded));
+
       sections.forEach(function (s) {
         var hit = s.textContent.toLowerCase().indexOf(needle) !== -1;
         s.classList.toggle('filtered-out', !hit);
-        if (hit) { matched++; highlight(s, q); }
+        if (hit) { matched++; setFolded(s, false, false); highlight(s, q); }
       });
 
       var visibleIds = sections
@@ -2296,6 +2408,15 @@
       status.textContent = matched === 0
         ? '「' + q + '」に一致するセクションはありません。'
         : '「' + q + '」に一致：' + matched + 'セクション（Escで解除）';
+    }
+
+    // 検索のために開けたものを、検索前の状態に戻す
+    function restoreFold() {
+      if (!foldSaved) return;
+      sections.forEach(function (s) { setFolded(s, !!foldSaved[s.id], false); });
+      folded = foldSaved;
+      foldSaved = null;
+      saveFold();
     }
 
     function sectionOf(id) {
@@ -2381,6 +2502,19 @@
 
     side.addEventListener('click', function (e) {
       if (e.target.closest('#toc a')) close();
+    });
+
+    // 目次から飛ぶ先が閉じていると何も見えないので、先に開けておく。
+    // 開けたぶん位置がずれるため、飛ぶのはそのあと自分でやる。
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      var target = document.getElementById(a.getAttribute('href').slice(1));
+      if (!target) return;
+      revealSection(target);
+      e.preventDefault();
+      history.replaceState(null, '', a.getAttribute('href'));
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     document.addEventListener('keydown', function (e) {
