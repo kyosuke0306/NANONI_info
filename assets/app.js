@@ -265,9 +265,6 @@
         path:   el.dataset.sharePath   || 'data/schedule.json',
         branch: el.dataset.shareBranch || 'main'
       },
-      phases: Array.prototype.map.call(el.querySelectorAll('[data-phase-def]'), function (s) {
-        return { id: s.dataset.phaseDef, label: s.dataset.label, color: s.dataset.color };
-      }),
       members: Array.prototype.map.call(el.querySelectorAll('[data-member]'), function (s) {
         return { id: s.dataset.member, name: s.dataset.name };
       }),
@@ -275,7 +272,7 @@
         return {
           id: s.dataset.task, name: s.dataset.name, detail: s.dataset.detail || '',
           from: s.dataset.from, to: s.dataset.to,
-          phase: s.dataset.phase, priority: s.dataset.priority || 'mid'
+          color: s.dataset.color, priority: s.dataset.priority || 'mid'
         };
       })
     };
@@ -307,24 +304,20 @@
     // ひな形の更新時刻は 0（＝いちばん古い）。初めて開いた人のひな形が、
     // 共有されている本物の予定を上書きしてしまわないようにするため。
     function fromPreset() {
-      var t0 = 0;
       return {
-        phases:  preset.phases.map(function (p) {
-          return { id: p.id, label: p.label, color: toColor(p.color), updated: t0 };
-        }),
         members: preset.members.map(function (m) {
-          return { id: m.id, name: m.name, updated: t0 };
+          return { id: m.id, name: m.name, updated: 0 };
         }),
-        tasks:   preset.tasks.map(function (t) {
+        tasks: preset.tasks.map(function (t) {
           return { id: t.id, name: t.name, detail: t.detail, from: t.from, to: t.to,
-                   phase: t.phase, assignee: '', priority: t.priority,
-                   status: 'todo', at: '', subs: [], updated: t0 };
+                   color: toColor(t.color), assignee: '', priority: t.priority,
+                   status: 'todo', at: '', subs: [], updated: 0 };
         }),
         graves: {}
       };
     }
 
-    function emptyState() { return { phases: [], members: [], tasks: [], graves: {} }; }
+    function emptyState() { return { members: [], tasks: [], graves: {} }; }
 
     function toColor(id) {
       if (PHASE_COLORS.some(function (c) { return c.id === id; })) return id;
@@ -334,7 +327,6 @@
       return PRIORITIES.some(function (p) { return p.id === id; }) ? id : 'mid';
     }
 
-    // 状態だけを持っていた古い記録（進捗のみ）を引き継ぐ
     function migrate(base) {
       var old = readStore(PROGRESS_KEY, null);
       if (!old) return base;
@@ -357,15 +349,13 @@
         return base;
       }
 
-      // 更新時刻が無い記録は、共有側より古い扱いにする（1 = ほぼ最古）
-      var t0 = 1;
-      var phases = Array.isArray(next.phases)
-        ? next.phases.filter(function (p) { return p && typeof p === 'object' && p.id; })
-                     .map(function (p) {
-            return { id: String(p.id), label: p.label == null ? '' : String(p.label),
-                     color: toColor(p.color), updated: +p.updated || t0 };
-          })
-        : fromPreset().phases;
+      var t0 = 1;   // 更新時刻が無い記録は、共有側より古い扱いにする
+
+      // 区分があった頃の記録：区分の色を、その区分を使っていた作業へ移す
+      var byPhase = {};
+      if (Array.isArray(next.phases)) {
+        next.phases.forEach(function (p) { if (p && p.id) byPhase[p.id] = toColor(p.color); });
+      }
 
       var members = Array.isArray(next.members)
         ? next.members.filter(function (m) { return m && typeof m === 'object' && m.id; })
@@ -375,8 +365,7 @@
           })
         : fromPreset().members;
 
-      var knownP = {}, knownM = {};
-      phases.forEach(function (p) { knownP[p.id] = 1; });
+      var knownM = {};
       members.forEach(function (m) { knownM[m.id] = 1; });
 
       var tasks = next.tasks.filter(function (t) { return t && typeof t === 'object'; })
@@ -387,7 +376,7 @@
           detail: t.detail == null ? '' : String(t.detail),
           from:   t.from   == null ? '' : String(t.from),
           to:     t.to     == null ? '' : String(t.to),
-          phase: knownP[t.phase] ? t.phase : (phases.length ? phases[0].id : ''),
+          color: t.color ? toColor(t.color) : (byPhase[t.phase] || PHASE_COLORS[0].id),
           assignee: knownM[t.assignee] ? t.assignee : '',
           priority: toPriority(t.priority),
           status: t.status === 'doing' || t.status === 'done' ? t.status : 'todo',
@@ -397,6 +386,8 @@
                     .map(function (x, j) {
                 return { id: x.id || ('s' + i + '-' + j + '-' + t0),
                          text: x.text == null ? '' : String(x.text),
+                         from: x.from == null ? '' : String(x.from),
+                         to:   x.to   == null ? '' : String(x.to),
                          done: !!x.done, updated: +x.updated || t0 };
               })
             : [],
@@ -407,13 +398,11 @@
       var graves = (next.graves && typeof next.graves === 'object' && !Array.isArray(next.graves))
         ? next.graves : {};
 
-      return { phases: phases, members: members, tasks: tasks, graves: graves };
+      return { members: members, tasks: tasks, graves: graves };
     }
 
     /* ---------------------------------------------- 2つの記録を混ぜる ---- */
 
-    // 同じ id は「あとに直したほう」を採る。消したものは墓標（graves）で判断する。
-    // 別々の作業を直しているかぎり、どちらの変更も消えない。
     function mergeList(mine, theirs, graves) {
       var byId = {}, order = [];
       theirs.forEach(function (r) { byId[r.id] = r; order.push(r.id); });
@@ -436,26 +425,19 @@
       });
 
       var tasks = mergeList(mine.tasks, theirs.tasks, graves);
-      // 小項目も同じ規則で混ぜる
-      var mineById = {};
+      var mineById = {}, theirsById = {};
       mine.tasks.forEach(function (t) { mineById[t.id] = t; });
-      var theirsById = {};
       theirs.tasks.forEach(function (t) { theirsById[t.id] = t; });
       tasks.forEach(function (t) {
-        var a = (mineById[t.id] || {}).subs || [];
-        var b = (theirsById[t.id] || {}).subs || [];
-        t.subs = mergeList(a, b, graves);
+        t.subs = mergeList((mineById[t.id] || {}).subs || [],
+                           (theirsById[t.id] || {}).subs || [], graves);
       });
 
       var sorted = {};
       Object.keys(graves).sort().forEach(function (k) { sorted[k] = graves[k]; });
 
-      return {
-        phases:  mergeList(mine.phases,  theirs.phases,  graves),
-        members: mergeList(mine.members, theirs.members, graves),
-        tasks:   tasks,
-        graves:  sorted
-      };
+      return { members: mergeList(mine.members, theirs.members, graves),
+               tasks: tasks, graves: sorted };
     }
 
     var stored = readStore(SCHEDULE_KEY, null);
@@ -463,14 +445,13 @@
 
     /* ================================================== 画面の骨組み ===== */
 
-    // 上＝見るところ、下＝直すところ
     var view = document.createElement('div');
     view.innerHTML =
       '<h3 id="schedule-detail">作業の内容</h3>' +
       '<div class="table-scroll"><table class="tbl view-table"><thead><tr>' +
-        '<th style="width:20%">項目名</th><th style="width:10%">担当</th>' +
+        '<th style="width:22%">項目名</th><th style="width:10%">担当</th>' +
         '<th style="width:9%">優先度</th><th style="width:12%">期間</th>' +
-        '<th style="width:9%">状態</th><th>内容と細分</th>' +
+        '<th style="width:9%">状態</th><th>内容と小項目</th>' +
       '</tr></thead><tbody data-view-body></tbody></table></div>' +
       '<h3 id="schedule-by-member">担当者ごとの担当項目</h3>' +
       '<div data-by-member></div>';
@@ -488,8 +469,8 @@
       '<h3 id="schedule-tasks">作業</h3>' +
       '<table class="tbl tbl-edit prog-table"><thead><tr>' +
         '<th style="width:24%">項目名</th><th style="width:13%">開始</th><th style="width:13%">終了</th>' +
-        '<th style="width:15%">区分</th><th style="width:13%">担当</th>' +
-        '<th style="width:11%">優先度</th><th style="width:11%">状態</th>' +
+        '<th style="width:19%">色</th><th style="width:12%">担当</th>' +
+        '<th style="width:9%">優先度</th><th style="width:9%">状態</th>' +
         '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
       '</tr></thead><tbody data-prog-body></tbody></table>' +
       '<div class="l2-actions">' +
@@ -498,7 +479,8 @@
       '</div>' +
 
       '<h3 id="schedule-split">作業の細分化</h3>' +
-      '<p class="viz-note">作業を小さく分けて書けます。内容は上の表に、小項目はチェックとして出ます。</p>' +
+      '<p class="viz-note">作業を小さく分けて書けます。小項目にも年月を入れると、' +
+        '図にその作業のぶら下がりとして出ます。</p>' +
       '<div data-split></div>' +
 
       '<h3 id="schedule-members">担当者</h3>' +
@@ -509,17 +491,6 @@
       '<div class="l2-actions">' +
         '<button type="button" data-add-member>担当者を足す</button>' +
         '<button type="button" class="is-danger" data-clear-members>全て削除する</button>' +
-      '</div>' +
-
-      '<h3 id="schedule-phases">区分（バーの色）</h3>' +
-      '<p class="viz-note">作業のまとまりに名前と色を付けます。図の凡例もここから作られます。</p>' +
-      '<table class="tbl tbl-edit phase-table"><thead><tr>' +
-        '<th style="width:36%">名前</th><th style="width:48%">色</th><th style="width:15%">使っている作業</th>' +
-        '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
-      '</tr></thead><tbody data-phase-body></tbody></table>' +
-      '<div class="l2-actions">' +
-        '<button type="button" data-add-phase>区分を足す</button>' +
-        '<button type="button" class="is-danger" data-clear-phases>全て削除する</button>' +
       '</div>';
 
     docEl.querySelector('#schedule').appendChild(panel);
@@ -530,16 +501,14 @@
 
     var io = ioPanel(function () { return state; },
                      function (next) { state = normalize(next); touch(); rebuild(); },
-                     emptyState, '作業・内容・担当者・区分・進捗');
+                     emptyState, '作業・内容・小項目・担当者・進捗');
     panel.appendChild(io);
 
     var tbody = panel.querySelector('[data-prog-body]');
     var mbody = panel.querySelector('[data-member-body]');
-    var pbody = panel.querySelector('[data-phase-body]');
     var splitBox = panel.querySelector('[data-split]');
     var vbody = view.querySelector('[data-view-body]');
 
-    // 端末に保存し、共有にも送る
     function touch() {
       writeStore(SCHEDULE_KEY, state);
       share.queue();
@@ -549,13 +518,6 @@
 
     /* ================================================== 参照 ============= */
 
-    var NO_PHASE = { id: '', label: '', color: PHASE_COLORS[0].id };
-    function phaseOf(id) {
-      for (var i = 0; i < state.phases.length; i++) {
-        if (state.phases[i].id === id) return state.phases[i];
-      }
-      return state.phases[0] || NO_PHASE;
-    }
     function memberName(id) {
       for (var i = 0; i < state.members.length; i++) {
         if (state.members[i].id === id) return state.members[i].name || '（名前なし）';
@@ -570,39 +532,50 @@
       for (var i = 0; i < STATUSES.length; i++) if (STATUSES[i].id === id) return STATUSES[i].label;
       return '';
     }
-    function usedBy(phaseId) {
-      return state.tasks.filter(function (t) { return t.phase === phaseId; }).length;
-    }
     function heldBy(memberId) {
       return state.tasks.filter(function (t) { return t.assignee === memberId; }).length;
     }
     function freeColor() {
       var taken = {};
-      state.phases.forEach(function (p) { taken[p.color] = 1; });
+      state.tasks.forEach(function (t) { taken[t.color] = 1; });
       for (var i = 0; i < PHASE_COLORS.length; i++) {
         if (!taken[PHASE_COLORS[i].id]) return PHASE_COLORS[i].id;
       }
-      return PHASE_COLORS[state.phases.length % PHASE_COLORS.length].id;
+      return PHASE_COLORS[state.tasks.length % PHASE_COLORS.length].id;
     }
     function priChip(id) {
       var p = priorityOf(id);
       return '<span class="pri pri-' + p.id + '"><i aria-hidden="true">' + p.dots + '</i>' + p.label + '</span>';
     }
-    function rangeLabel(t) {
-      var a = mIndex(t.from), b = mIndex(t.to);
-      if (a === null || b === null || b < a) return '';
-      return a === b ? mLabel(a, true)
-                     : mLabel(a, true) + '〜' + mLabel(b, Math.floor(a / 12) !== Math.floor(b / 12));
+    function rangeOf(o) {
+      var a = mIndex(o.from), b = mIndex(o.to);
+      if (a === null || b === null || b < a) return null;
+      return { a: a, b: b };
+    }
+    function rangeLabel(o) {
+      var r = rangeOf(o);
+      if (!r) return '';
+      return r.a === r.b ? mLabel(r.a, true)
+                         : mLabel(r.a, true) + '〜' + mLabel(r.b, Math.floor(r.a / 12) !== Math.floor(r.b / 12));
+    }
+    function subDone(t) {
+      return t.subs.filter(function (s) { return s.done; }).length;
+    }
+    function swatches(sel, attr) {
+      return '<div class="ph-swatches" role="group" aria-label="色">' +
+        PHASE_COLORS.map(function (c) {
+          return '<button type="button" class="ph-sw ph-' + c.id + (c.id === sel ? ' is-on' : '') +
+                 '" ' + attr + ' data-color="' + c.id + '" title="' + c.label + '" aria-label="' + c.label + '"' +
+                 (c.id === sel ? ' aria-pressed="true"' : ' aria-pressed="false"') + '></button>';
+        }).join('') + '</div>';
     }
 
     /* ================================================== 表を組む ========= */
 
     function reconcile() {
-      var knownP = {}, knownM = {};
-      state.phases.forEach(function (p) { knownP[p.id] = 1; });
+      var knownM = {};
       state.members.forEach(function (m) { knownM[m.id] = 1; });
       state.tasks.forEach(function (t) {
-        if (state.phases.length && !knownP[t.phase]) t.phase = state.phases[0].id;
         if (!knownM[t.assignee]) t.assignee = '';
         if (!Array.isArray(t.subs)) t.subs = [];
       });
@@ -625,12 +598,7 @@
               '<td><input type="text" data-t="name" value="' + esc(t.name) + '" placeholder="項目名"></td>' +
               '<td><input type="month" data-t="from" value="' + esc(t.from) + '"></td>' +
               '<td><input type="month" data-t="to" value="' + esc(t.to) + '"></td>' +
-              '<td><select data-t="phase"' + (state.phases.length ? '' : ' disabled') + '>' +
-                (state.phases.length
-                  ? options(state.phases.map(function (p) {
-                      return { id: p.id, label: p.label || '（名前なし）' }; }), t.phase, '')
-                  : '<option value="">（区分なし）</option>') +
-              '</select></td>' +
+              '<td>' + swatches(t.color, 'data-task-color') + '</td>' +
               '<td><select data-t="assignee"' + (state.members.length ? '' : ' disabled') + '>' +
                 (state.members.length
                   ? options(state.members.map(function (m) {
@@ -651,21 +619,30 @@
       splitBox.innerHTML = state.tasks.length
         ? state.tasks.map(function (t, i) {
             return '<div class="split-card" data-i="' + i + '">' +
-              '<p class="split-head"><b>' + esc(t.name || '（名前なし）') + '</b>' + priChip(t.priority) + '</p>' +
+              '<p class="split-head"><span class="split-dot ph-' + esc(t.color) + '"></span>' +
+                '<b>' + esc(t.name || '（名前なし）') + '</b>' + priChip(t.priority) +
+                (t.subs.length ? '<span class="split-count">小項目 ' + subDone(t) + ' / ' + t.subs.length + '</span>' : '') +
+              '</p>' +
               '<label class="split-detail"><span>内容</span>' +
                 '<textarea data-t="detail" rows="2" placeholder="くわしい中身・決めること・必要な材料など">' +
                 esc(t.detail) + '</textarea></label>' +
-              '<ul class="split-subs">' + t.subs.map(function (s, j) {
-                return '<li data-j="' + j + '">' +
-                  '<input type="checkbox" data-s="done"' + (s.done ? ' checked' : '') +
-                    ' aria-label="この小項目を完了にする">' +
-                  '<input type="text" data-s="text" value="' + esc(s.text) + '" placeholder="小さく分けた作業">' +
-                  '<button type="button" class="l2-del" data-del-sub aria-label="この小項目を消す">×</button>' +
-                '</li>';
-              }).join('') + '</ul>' +
-              '<div class="split-actions"><button type="button" data-add-sub>小項目を足す</button>' +
-                (t.subs.length ? '<span class="split-count">' + subDone(t) + ' / ' + t.subs.length + ' 完了</span>' : '') +
-              '</div>' +
+              (t.subs.length
+                ? '<div class="table-scroll"><table class="tbl tbl-edit sub-table"><thead><tr>' +
+                    '<th style="width:6%"><span class="visually-hidden">完了</span></th>' +
+                    '<th>小項目</th><th style="width:19%">開始</th><th style="width:19%">終了</th>' +
+                    '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
+                  '</tr></thead><tbody>' + t.subs.map(function (s, j) {
+                    return '<tr data-j="' + j + '"' + (s.done ? ' class="is-done"' : '') + '>' +
+                      '<td><input type="checkbox" data-s="done"' + (s.done ? ' checked' : '') +
+                        ' aria-label="この小項目を完了にする"></td>' +
+                      '<td><input type="text" data-s="text" value="' + esc(s.text) + '" placeholder="小さく分けた作業"></td>' +
+                      '<td><input type="month" data-s="from" value="' + esc(s.from) + '"></td>' +
+                      '<td><input type="month" data-s="to" value="' + esc(s.to) + '"></td>' +
+                      '<td><button type="button" class="l2-del" data-del-sub aria-label="この小項目を消す">×</button></td>' +
+                    '</tr>';
+                  }).join('') + '</tbody></table></div>'
+                : '') +
+              '<div class="split-actions"><button type="button" data-add-sub>小項目を足す</button></div>' +
             '</div>';
           }).join('')
         : '<p class="l2-empty">作業を足すと、ここで細かく分けられます。</p>';
@@ -681,29 +658,7 @@
         : '<tr class="l2-none"><td colspan="3">担当者がいません。' +
           '「担当者を足す」から登録すると、作業に割り当てられます。</td></tr>';
 
-      pbody.innerHTML = state.phases.length
-        ? state.phases.map(function (p, i) {
-            return '<tr data-i="' + i + '">' +
-              '<td><input type="text" data-ph="label" value="' + esc(p.label) + '" placeholder="区分の名前"></td>' +
-              '<td><div class="ph-swatches" role="group" aria-label="' + esc(p.label) + ' の色">' +
-                PHASE_COLORS.map(function (c) {
-                  return '<button type="button" class="ph-sw ph-' + c.id + (c.id === p.color ? ' is-on' : '') +
-                         '" data-color="' + c.id + '" title="' + c.label + '" aria-label="' + c.label + '"' +
-                         (c.id === p.color ? ' aria-pressed="true"' : ' aria-pressed="false"') + '></button>';
-                }).join('') +
-              '</div></td>' +
-              '<td class="ph-count">' + usedBy(p.id) + '件</td>' +
-              '<td><button type="button" class="l2-del" data-del-phase aria-label="この区分を消す">×</button></td>' +
-            '</tr>';
-          }).join('')
-        : '<tr class="l2-none"><td colspan="4">区分がありません。' +
-          '「区分を足す」から作ると、作業に色を付けられます。</td></tr>';
-
       paint();
-    }
-
-    function subDone(t) {
-      return t.subs.filter(function (s) { return s.done; }).length;
     }
 
     /* ================================================== 表示（上）======== */
@@ -714,7 +669,8 @@
             var who = memberName(t.assignee);
             var range = rangeLabel(t);
             return '<tr class="is-' + t.status + '">' +
-              '<td class="vt-name">' + esc(t.name || '（名前なし）') + '</td>' +
+              '<td class="vt-name"><span class="split-dot ph-' + esc(t.color) + '"></span>' +
+                esc(t.name || '（名前なし）') + '</td>' +
               '<td class="vt-who">' + (who ? esc(who) : '<span class="vt-none">未割当</span>') + '</td>' +
               '<td>' + priChip(t.priority) + '</td>' +
               '<td class="vt-when">' + (range ? esc(range) : '<span class="vt-none">未定</span>') + '</td>' +
@@ -724,8 +680,10 @@
                 (t.subs.length
                   ? '<p class="vt-subhead">小項目 ' + subDone(t) + ' / ' + t.subs.length + '</p>' +
                     '<ul class="vt-subs">' + t.subs.map(function (s) {
+                      var r = rangeLabel(s);
                       return '<li class="' + (s.done ? 'is-done' : '') + '">' +
-                             esc(s.text || '（空）') + '</li>';
+                             esc(s.text || '（空）') +
+                             (r ? '<span class="vt-subwhen">' + esc(r) + '</span>' : '') + '</li>';
                     }).join('') + '</ul>'
                   : '') +
                 (!t.detail && !t.subs.length ? '<span class="vt-none">—</span>' : '') +
@@ -778,17 +736,14 @@
         var m = state.members[+tr.dataset.i];
         if (m) tr.querySelector('.ph-count').textContent = heldBy(m.id) + '件';
       });
-      pbody.querySelectorAll('tr[data-i]').forEach(function (tr) {
-        var p = state.phases[+tr.dataset.i];
-        if (p) tr.querySelector('.ph-count').textContent = usedBy(p.id) + '件';
-      });
       splitBox.querySelectorAll('.split-card').forEach(function (card) {
         var t = state.tasks[+card.dataset.i];
         if (!t) return;
         card.querySelector('.split-head b').textContent = t.name || '（名前なし）';
+        card.querySelector('.split-dot').className = 'split-dot ph-' + t.color;
         card.querySelector('.pri').outerHTML = priChip(t.priority);
         var c = card.querySelector('.split-count');
-        if (c) c.textContent = subDone(t) + ' / ' + t.subs.length + ' 完了';
+        if (c) c.textContent = '小項目 ' + subDone(t) + ' / ' + t.subs.length;
       });
 
       renderView();
@@ -799,20 +754,36 @@
 
     /* ================================================== ガント図 ========= */
 
-    function renderGantt() {
-      var ok = state.tasks.filter(function (t) {
-        return mIndex(t.from) !== null && mIndex(t.to) !== null && mIndex(t.to) >= mIndex(t.from);
+    // 作業と、年月が入っている小項目を1行ずつ並べる（小項目はぶら下げて描く）
+    function ganttRows() {
+      var rows = [];
+      state.tasks.forEach(function (t) {
+        rows.push({ kind: 'task', name: t.name || '（名前なし）', who: memberName(t.assignee),
+                    color: t.color, status: t.status, range: rangeOf(t), label: rangeLabel(t),
+                    pri: priorityOf(t.priority).label });
+        t.subs.forEach(function (s) {
+          var r = rangeOf(s);
+          if (!r) return;   // 年月の無い小項目は図に出さない
+          rows.push({ kind: 'sub', name: s.text || '（空）', who: '', color: t.color,
+                      status: s.done ? 'done' : 'todo', range: r, label: rangeLabel(s), pri: '' });
+        });
       });
+      return rows;
+    }
 
-      if (!ok.length) {
+    function renderGantt() {
+      var rows = ganttRows();
+      var dated = rows.filter(function (r) { return r.range; });
+
+      if (!dated.length) {
         host.innerHTML = '<figure class="viz"><p class="l2-empty">' +
           '下の表に作業と「開始」「終了」の年月を入れると、ここにガント図が出ます。' +
           '（終了は開始と同じ月でもかまいません）</p></figure>';
         return;
       }
 
-      var min = Math.min.apply(null, ok.map(function (t) { return mIndex(t.from); }));
-      var max = Math.max.apply(null, ok.map(function (t) { return mIndex(t.to); }));
+      var min = Math.min.apply(null, dated.map(function (r) { return r.range.a; }));
+      var max = Math.max.apply(null, dated.map(function (r) { return r.range.b; }));
       var span = max - min + 1;
       var step = Math.max(1, Math.ceil(span / 4));
 
@@ -826,39 +797,27 @@
       for (var i = 0; i <= span; i += step) tick(i);
       if (ticks[ticks.length - 1].at < 100) tick(span);
 
-      var rows = state.tasks.map(function (t) {
-        var a = mIndex(t.from), b = mIndex(t.to);
-        var who = memberName(t.assignee);
-        // 図に出すのは項目名と担当だけ（内容は上の表に出す）
-        var name = '<span class="gt-name">' + esc(t.name || '（名前なし）') +
-                   (who ? '<small>' + esc(who) + '</small>' : '') + '</span>';
+      var html = rows.map(function (r) {
+        var cls = 'gt-row is-' + r.status + (r.kind === 'sub' ? ' is-sub' : '');
+        var name = '<span class="gt-name">' + esc(r.name) +
+                   (r.who ? '<small>' + esc(r.who) + '</small>' : '') + '</span>';
 
-        if (a === null || b === null || b < a) {
-          return '<div class="gt-row is-' + t.status + '">' + name +
+        if (!r.range) {
+          return '<div class="' + cls + '">' + name +
                  '<span class="gt-track"><span class="gt-blank">年月を入れてください</span></span></div>';
         }
-        var left  = (a - min) / span * 100;
-        var width = (b - a + 1) / span * 100;
-        var label = rangeLabel(t);
+        var left  = (r.range.a - min) / span * 100;
+        var width = (r.range.b - r.range.a + 1) / span * 100;
         var place = width >= 30 ? ' class="inside"' : (left + width > 62 ? ' class="before"' : '');
 
-        return '<div class="gt-row is-' + t.status + '">' + name +
-          '<span class="gt-track"><span class="gt-bar ph-' + esc(phaseOf(t.phase).color) + '" ' +
+        return '<div class="' + cls + '">' + name +
+          '<span class="gt-track"><span class="gt-bar ph-' + esc(r.color) + '" ' +
             'style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%" ' +
-            'title="' + esc(t.name) + ' ' + label + (who ? '／担当 ' + esc(who) : '') +
-            '／優先度 ' + priorityOf(t.priority).label + '"' +
-            '><span' + place + '>' + label + '</span></span></span>' +
+            'title="' + esc(r.name) + ' ' + r.label + (r.who ? '／担当 ' + esc(r.who) : '') +
+            (r.pri ? '／優先度 ' + r.pri : '') + '"' +
+            '><span' + place + '>' + r.label + '</span></span></span>' +
         '</div>';
       }).join('');
-
-      var used = {};
-      state.tasks.forEach(function (t) { used[t.phase] = 1; });
-      var items = state.phases.filter(function (p) { return used[p.id]; })
-        .map(function (p) {
-          return '<li><span class="sw ph-' + esc(p.color) + '"></span>' +
-                 esc(p.label || '（名前なし）') + '</li>';
-        });
-      var legend = items.length ? '<ul class="viz-legend">' + items.join('') + '</ul>' : '';
 
       host.innerHTML =
         '<figure class="viz">' +
@@ -868,20 +827,19 @@
               ticks.map(function (t) {
                 return '<span style="left:' + t.at.toFixed(2) + '%">' + t.text + '</span>';
               }).join('') +
-            '</span></div>' + rows +
-          '</div>' + legend +
+            '</span></div>' + html +
+          '</div>' +
         '</figure>';
     }
 
     /* ================================================== 入力 ============= */
 
     function applyInput(el) {
-      var row = el.closest('tr, .split-card, li');
-      if (!row) return;
+      var card = el.closest('.split-card');
 
       if (el.dataset.t) {
-        var card = el.closest('.split-card');
-        var t = state.tasks[+(card ? card.dataset.i : row.dataset.i)];
+        var tr = el.closest('tr');
+        var t = state.tasks[+(card ? card.dataset.i : tr.dataset.i)];
         if (!t) return;
         if (el.dataset.t === 'status' && el.value !== t.status) {
           t.at = el.value === 'todo' ? '' : today();
@@ -895,33 +853,22 @@
       }
 
       if (el.dataset.s) {
-        var li = el.closest('li');
-        var owner = state.tasks[+li.closest('.split-card').dataset.i];
-        var sub = owner && owner.subs[+li.dataset.j];
+        var row = el.closest('tr');
+        var owner = card && state.tasks[+card.dataset.i];
+        var sub = owner && owner.subs[+row.dataset.j];
         if (!sub) return;
         sub[el.dataset.s] = el.type === 'checkbox' ? el.checked : el.value;
         sub.updated = now();
         owner.updated = now();
+        row.classList.toggle('is-done', !!sub.done);
         touch();
-        paint();
-        return;
-      }
-
-      if (el.dataset.ph) {
-        var p = state.phases[+row.dataset.i];
-        if (!p) return;
-        p[el.dataset.ph] = el.value;
-        p.updated = now();
-        touch();
-        tbody.querySelectorAll('[data-t="phase"] option[value="' + p.id + '"]').forEach(function (o) {
-          o.textContent = p.label || '（名前なし）';
-        });
         paint();
         return;
       }
 
       if (el.dataset.m) {
-        var m = state.members[+row.dataset.i];
+        var mr = el.closest('tr');
+        var m = state.members[+mr.dataset.i];
         if (!m) return;
         m[el.dataset.m] = el.value;
         m.updated = now();
@@ -944,11 +891,12 @@
       var btn = e.target.closest('button');
       if (!btn) return;
 
-      if (btn.classList.contains('ph-sw')) {
-        var ph = state.phases[+btn.closest('tr').dataset.i];
-        if (!ph) return;
-        ph.color = btn.dataset.color;
-        ph.updated = now();
+      // 色見本は行を作り直さず、押した見本の印だけを付け替える
+      if (btn.hasAttribute('data-task-color')) {
+        var ct = state.tasks[+btn.closest('tr').dataset.i];
+        if (!ct) return;
+        ct.color = btn.dataset.color;
+        ct.updated = now();
         btn.parentElement.querySelectorAll('.ph-sw').forEach(function (b) {
           var on = b === btn;
           b.classList.toggle('is-on', on);
@@ -961,9 +909,8 @@
 
       if (btn.hasAttribute('data-add-task')) {
         state.tasks.push({ id: 'task-' + now(), name: '', detail: '', from: '', to: '',
-                           phase: state.phases.length ? state.phases[0].id : '',
-                           assignee: '', priority: 'mid', status: 'todo', at: '',
-                           subs: [], updated: now() });
+                           color: freeColor(), assignee: '', priority: 'mid',
+                           status: 'todo', at: '', subs: [], updated: now() });
       } else if (btn.hasAttribute('data-del-task')) {
         var goneT = state.tasks[+btn.closest('tr').dataset.i];
         if (!goneT) return;
@@ -973,32 +920,16 @@
       } else if (btn.hasAttribute('data-add-sub')) {
         var owner = state.tasks[+btn.closest('.split-card').dataset.i];
         if (!owner) return;
-        owner.subs.push({ id: 'sub-' + now(), text: '', done: false, updated: now() });
+        owner.subs.push({ id: 'sub-' + now(), text: '', from: '', to: '', done: false, updated: now() });
         owner.updated = now();
       } else if (btn.hasAttribute('data-del-sub')) {
-        var li = btn.closest('li');
-        var host2 = state.tasks[+li.closest('.split-card').dataset.i];
+        var srow = btn.closest('tr');
+        var host2 = state.tasks[+btn.closest('.split-card').dataset.i];
         if (!host2) return;
-        var goneS = host2.subs[+li.dataset.j];
+        var goneS = host2.subs[+srow.dataset.j];
         if (goneS) bury(goneS.id);
         host2.subs = host2.subs.filter(function (s) { return s !== goneS; });
         host2.updated = now();
-      } else if (btn.hasAttribute('data-add-phase')) {
-        state.phases.push({ id: 'ph-' + now(), label: '', color: freeColor(), updated: now() });
-      } else if (btn.hasAttribute('data-del-phase')) {
-        var gone = state.phases[+btn.closest('tr').dataset.i];
-        if (!gone) return;
-        var n = usedBy(gone.id);
-        var next = state.phases.filter(function (p) { return p !== gone; })[0];
-        if (n && !confirm('「' + (gone.label || '名前なし') + '」を使っている作業が' + n + '件あります。\n' +
-                          (next ? 'それらは「' + (next.label || '名前なし') + '」に変わります。'
-                                : 'それらは区分なしになります。') +
-                          '\n\nよろしいですか？')) return;
-        state.tasks.forEach(function (t) {
-          if (t.phase === gone.id) { t.phase = next ? next.id : ''; t.updated = now(); }
-        });
-        bury(gone.id);
-        state.phases = state.phases.filter(function (p) { return p !== gone; });
       } else if (btn.hasAttribute('data-add-member')) {
         state.members.push({ id: 'mem-' + now(), name: '', updated: now() });
       } else if (btn.hasAttribute('data-del-member')) {
@@ -1015,7 +946,7 @@
       } else if (btn.hasAttribute('data-clear-tasks')) {
         if (!state.tasks.length) return;
         if (!confirm('作業を' + state.tasks.length + '件すべて削除します。内容・小項目・進捗も消えます。\n' +
-                     '（担当者と区分は残ります）\n\nよろしいですか？')) return;
+                     '（担当者は残ります）\n\nよろしいですか？')) return;
         state.tasks.forEach(function (t) {
           bury(t.id);
           t.subs.forEach(function (s) { bury(s.id); });
@@ -1032,17 +963,6 @@
         state.members.forEach(function (m) { bury(m.id); });
         state.members = [];
         state.tasks.forEach(function (t) { t.assignee = ''; t.updated = now(); });
-      } else if (btn.hasAttribute('data-clear-phases')) {
-        if (!state.phases.length) return;
-        var knownP = {};
-        state.phases.forEach(function (p) { knownP[p.id] = 1; });
-        var inUse = state.tasks.filter(function (t) { return knownP[t.phase]; }).length;
-        if (!confirm('区分を' + state.phases.length + '件すべて削除します。\n' +
-                     (inUse ? '作業' + inUse + '件は区分なしになり、バーは同じ色になります。\n' : '') +
-                     '（作業そのものは消えません）\n\nよろしいですか？')) return;
-        state.phases.forEach(function (p) { bury(p.id); });
-        state.phases = [];
-        state.tasks.forEach(function (t) { t.phase = ''; t.updated = now(); });
       } else return;
 
       touch();

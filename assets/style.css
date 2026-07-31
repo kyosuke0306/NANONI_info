@@ -1474,7 +1474,6 @@ h3::before {
 
 /* --- 区分の編集 --- */
 
-.phase-table  { min-width: 620px; }   /* 色見本6つが1行に収まる幅 */
 .member-table { min-width: 380px; }
 .detail-table { min-width: 560px; }
 .prog-table   { min-width: 1020px; }  /* 項目名・開始・終了・区分・担当・優先度・状態 */
@@ -1501,6 +1500,12 @@ h3::before {
 .view-table { min-width: 760px; }
 .view-table td { vertical-align: top; font-weight: 400; }
 .view-table .vt-name { font-weight: 700; }
+.vt-subwhen {
+  margin-left: 7px;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 .view-table .vt-who,
 .view-table .vt-when { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .view-table .vt-when { font-variant-numeric: tabular-nums; }
@@ -1545,6 +1550,25 @@ h3::before {
 
 /* --- 作業の細分化（下で直す） --- */
 
+/* 作業の色。項目名の頭に小さく置く */
+.split-dot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  margin-right: 7px;
+  border-radius: 3px;
+  background: var(--ph-color);
+  vertical-align: 1px;
+  flex: 0 0 auto;
+}
+
+/* 小項目の表（カードの中） */
+.sub-table { min-width: 460px; margin-top: 11px; }
+.sub-table thead th { font-size: 10.5px; padding: 7px 9px; }
+.sub-table td { padding: 7px 9px; }
+.sub-table input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--green); }
+.sub-table tr.is-done input[type="text"] { color: var(--muted); text-decoration: line-through; }
+
+
 .split-card {
   padding: 14px 16px;
   margin-top: 12px;
@@ -1557,9 +1581,11 @@ h3::before {
 .split-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 9px;
   margin: 0 0 10px;
 }
+.split-head .split-count { margin-left: auto; }
 .split-head b { font-size: 14px; }
 
 .split-detail { display: grid; gap: 4px; }
@@ -1619,8 +1645,34 @@ h3::before {
 /* ガントの担当名 */
 .gt-name small { display: block; color: var(--muted); font-size: 10.5px; }
 
+/* 小項目の行は、その作業にぶら下げて細く描く */
+.gt-row.is-sub .gt-name {
+  padding-left: 16px;
+  font-size: 11.5px;
+  color: var(--muted);
+  position: relative;
+}
+.gt-row.is-sub .gt-name::before {
+  content: "";
+  position: absolute;
+  left: 5px; top: 0; bottom: 50%;
+  width: 6px;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.gt-row.is-sub .gt-track { height: 14px; }
+.gt-row.is-sub .gt-bar {
+  top: 3px;
+  height: 8px;
+  border-radius: 3px;
+  opacity: .78;
+}
+.gt-row.is-sub .gt-bar > span { font-size: 10px; }
+.gt-row.is-sub .gt-bar > span.inside { padding: 0 5px; }
+.gt-row.is-sub.is-done .gt-name { text-decoration: line-through; }
+
 @media print {
-  .split-card, .prog-table, .member-table, .phase-table { display: none; }
+  .split-card, .prog-table, .member-table { display: none; }
 }
 
 /* --- 優先度 --- */
