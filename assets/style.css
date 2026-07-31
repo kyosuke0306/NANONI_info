@@ -1506,6 +1506,14 @@ h3::before {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.vt-subdetail {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.vt-subs li.is-done .vt-subdetail { color: var(--muted); }
 .view-table .vt-who,
 .view-table .vt-when { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .view-table .vt-when { font-variant-numeric: tabular-nums; }
@@ -1562,11 +1570,27 @@ h3::before {
 }
 
 /* 小項目の表（カードの中） */
-.sub-table { min-width: 460px; margin-top: 11px; }
+.sub-table { min-width: 880px; margin-top: 11px; }
 .sub-table thead th { font-size: 10.5px; padding: 7px 9px; }
-.sub-table td { padding: 7px 9px; }
+.sub-table td { padding: 7px 9px; vertical-align: top; }
+/* 年月の入力欄は縮むと読めなくなるので下限を決め、内容の列を伸縮させる */
+.sub-table input[type="month"] { min-width: 128px; }
 .sub-table input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--green); }
 .sub-table tr.is-done input[type="text"] { color: var(--muted); text-decoration: line-through; }
+.sub-table textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 9px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  resize: vertical;
+}
+.sub-table textarea:focus { outline: 0; border-color: var(--accent); }
 
 
 .split-card {

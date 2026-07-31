@@ -385,7 +385,8 @@
             ? t.subs.filter(function (x) { return x && typeof x === 'object'; })
                     .map(function (x, j) {
                 return { id: x.id || ('s' + i + '-' + j + '-' + t0),
-                         text: x.text == null ? '' : String(x.text),
+                         text:   x.text   == null ? '' : String(x.text),
+                         detail: x.detail == null ? '' : String(x.detail),
                          from: x.from == null ? '' : String(x.from),
                          to:   x.to   == null ? '' : String(x.to),
                          done: !!x.done, updated: +x.updated || t0 };
@@ -460,7 +461,7 @@
     var panel = document.createElement('section');
     panel.id = 'progress';
     panel.innerHTML =
-      '<h2>ここから下で書き換える</h2>' +
+      '<h2>編集</h2>' +
       '<div class="prog-summary">' +
         '<p class="prog-count"><b data-done>0</b> / <span data-total>0</span> 完了</p>' +
         '<div class="prog-meter"><span data-meter style="width:0%"></span></div>' +
@@ -628,14 +629,17 @@
                 esc(t.detail) + '</textarea></label>' +
               (t.subs.length
                 ? '<div class="table-scroll"><table class="tbl tbl-edit sub-table"><thead><tr>' +
-                    '<th style="width:6%"><span class="visually-hidden">完了</span></th>' +
-                    '<th>小項目</th><th style="width:19%">開始</th><th style="width:19%">終了</th>' +
+                    '<th style="width:4%"><span class="visually-hidden">完了</span></th>' +
+                    '<th style="width:22%">小項目</th><th>内容</th>' +
+                    '<th style="width:19%">開始</th><th style="width:19%">終了</th>' +
                     '<th style="width:1%"><span class="visually-hidden">消す</span></th>' +
                   '</tr></thead><tbody>' + t.subs.map(function (s, j) {
                     return '<tr data-j="' + j + '"' + (s.done ? ' class="is-done"' : '') + '>' +
                       '<td><input type="checkbox" data-s="done"' + (s.done ? ' checked' : '') +
                         ' aria-label="この小項目を完了にする"></td>' +
                       '<td><input type="text" data-s="text" value="' + esc(s.text) + '" placeholder="小さく分けた作業"></td>' +
+                      '<td><textarea data-s="detail" rows="2" placeholder="くわしい中身">' +
+                        esc(s.detail) + '</textarea></td>' +
                       '<td><input type="month" data-s="from" value="' + esc(s.from) + '"></td>' +
                       '<td><input type="month" data-s="to" value="' + esc(s.to) + '"></td>' +
                       '<td><button type="button" class="l2-del" data-del-sub aria-label="この小項目を消す">×</button></td>' +
@@ -683,7 +687,9 @@
                       var r = rangeLabel(s);
                       return '<li class="' + (s.done ? 'is-done' : '') + '">' +
                              esc(s.text || '（空）') +
-                             (r ? '<span class="vt-subwhen">' + esc(r) + '</span>' : '') + '</li>';
+                             (r ? '<span class="vt-subwhen">' + esc(r) + '</span>' : '') +
+                             (s.detail ? '<span class="vt-subdetail">' + esc(s.detail) + '</span>' : '') +
+                             '</li>';
                     }).join('') + '</ul>'
                   : '') +
                 (!t.detail && !t.subs.length ? '<span class="vt-none">—</span>' : '') +
@@ -765,7 +771,8 @@
           var r = rangeOf(s);
           if (!r) return;   // 年月の無い小項目は図に出さない
           rows.push({ kind: 'sub', name: s.text || '（空）', who: '', color: t.color,
-                      status: s.done ? 'done' : 'todo', range: r, label: rangeLabel(s), pri: '' });
+                      status: s.done ? 'done' : 'todo', range: r, label: rangeLabel(s),
+                      pri: '', note: s.detail });
         });
       });
       return rows;
@@ -814,7 +821,7 @@
           '<span class="gt-track"><span class="gt-bar ph-' + esc(r.color) + '" ' +
             'style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%" ' +
             'title="' + esc(r.name) + ' ' + r.label + (r.who ? '／担当 ' + esc(r.who) : '') +
-            (r.pri ? '／優先度 ' + r.pri : '') + '"' +
+            (r.pri ? '／優先度 ' + r.pri : '') + (r.note ? '\n' + esc(r.note) : '') + '"' +
             '><span' + place + '>' + r.label + '</span></span></span>' +
         '</div>';
       }).join('');
@@ -920,7 +927,8 @@
       } else if (btn.hasAttribute('data-add-sub')) {
         var owner = state.tasks[+btn.closest('.split-card').dataset.i];
         if (!owner) return;
-        owner.subs.push({ id: 'sub-' + now(), text: '', from: '', to: '', done: false, updated: now() });
+        owner.subs.push({ id: 'sub-' + now(), text: '', detail: '', from: '', to: '',
+                          done: false, updated: now() });
         owner.updated = now();
       } else if (btn.hasAttribute('data-del-sub')) {
         var srow = btn.closest('tr');
