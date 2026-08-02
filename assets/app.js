@@ -26,6 +26,8 @@
 
   var PROGRESS_KEY = 'nanoni.progress.v1';   // 旧・進捗だけの記録（読み込んで引き継ぐ）
   var SCHEDULE_KEY = 'nanoni.schedule.v1';  // 予定＋進捗
+  var GH_TOKEN_KEY = 'nanoni.ghtoken.v1';   // 共有用の GitHub トークン
+  var MYNAME_KEY   = 'nanoni.myname.v1';    // 共有したときに残す名前
 
   // 優先度。色だけに頼らないよう、丸の数でも表す
   var PRIORITIES = [
@@ -85,7 +87,16 @@
     return out;
   }
 
-  function deriveKey(password, salt, iterations) {
+  function bytesToB64(bytes) {
+    var out = '';
+    // 一度に渡すと大きい配列でスタックが溢れるので小分けにする
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(out);
+  }
+
+  function deriveKey(password, salt, iterations, usages) {
     return crypto.subtle
       .importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey'])
       .then(function (base) {
@@ -94,9 +105,39 @@
           base,
           { name: 'AES-GCM', length: 256 },
           false,
-          ['decrypt']
+          usages || ['decrypt']
         );
       });
+  }
+
+  // 共有する記録も本文と同じ方式で包む（公開リポジトリに平文を置かないため）
+  var SHARE_ITERATIONS = 310000;
+
+  function encryptText(password, text) {
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var iv   = crypto.getRandomValues(new Uint8Array(12));
+    return deriveKey(password, salt, SHARE_ITERATIONS, ['encrypt'])
+      .then(function (key) {
+        return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key,
+                                     new TextEncoder().encode(text));
+      })
+      .then(function (buf) {
+        return { v: 1, iterations: SHARE_ITERATIONS, salt: bytesToB64(salt),
+                 iv: bytesToB64(iv), ct: bytesToB64(new Uint8Array(buf)) };
+      });
+  }
+
+  function decryptBlob(password, blob) {
+    return deriveKey(password, b64ToBytes(blob.salt), blob.iterations, ['decrypt'])
+      .then(function (key) {
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(blob.iv) }, key,
+                                     b64ToBytes(blob.ct));
+      })
+      .then(function (buf) { return new TextDecoder().decode(buf); });
+  }
+
+  function sessionPassword() {
+    try { return sessionStorage.getItem(SESSION_KEY) || ''; } catch (e) { return ''; }
   }
 
   function decrypt(password) {
@@ -394,6 +435,11 @@
     var el = docEl.querySelector('[data-schedule-preset]');
     if (!el) return null;
     return {
+      share: {
+        repo:   el.dataset.shareRepo   || '',
+        path:   el.dataset.sharePath   || 'data/schedule.json',
+        branch: el.dataset.shareBranch || 'main'
+      },
       members: Array.prototype.map.call(el.querySelectorAll('[data-member]'), function (s) {
         return { id: s.dataset.member, name: s.dataset.name };
       }),
@@ -430,20 +476,23 @@
 
     /* ================================================== 状態の形 ========= */
 
+    // ひな形の更新時刻は 0（＝いちばん古い）。初めて開いた人のひな形が、
+    // 共有されている本物の予定を上書きしてしまわないようにするため。
     function fromPreset() {
       return {
         members: preset.members.map(function (m) {
-          return { id: m.id, name: m.name };
+          return { id: m.id, name: m.name, updated: 0 };
         }),
         tasks: preset.tasks.map(function (t) {
           return { id: t.id, name: t.name, detail: t.detail, from: t.from, to: t.to,
                    color: toColor(t.color), assignee: '', priority: t.priority,
-                   status: 'todo', at: '', subs: [] };
+                   status: 'todo', at: '', subs: [], updated: 0 };
         }),
+        graves: {}
       };
     }
 
-    function emptyState() { return { members: [], tasks: [] }; }
+    function emptyState() { return { members: [], tasks: [], graves: {} }; }
 
     function toColor(id) {
       if (PHASE_COLORS.some(function (c) { return c.id === id; })) return id;
@@ -486,7 +535,8 @@
       var members = Array.isArray(next.members)
         ? next.members.filter(function (m) { return m && typeof m === 'object' && m.id; })
                       .map(function (m) {
-            return { id: String(m.id), name: m.name == null ? '' : String(m.name) };
+            return { id: String(m.id), name: m.name == null ? '' : String(m.name),
+                     updated: +m.updated || t0 };
           })
         : fromPreset().members;
 
@@ -514,13 +564,56 @@
                          detail: x.detail == null ? '' : String(x.detail),
                          from: x.from == null ? '' : String(x.from),
                          to:   x.to   == null ? '' : String(x.to),
-                         done: !!x.done };
+                         done: !!x.done, updated: +x.updated || t0 };
               })
-            : []
+            : [],
+          updated: +t.updated || t0
         };
       });
 
-      return { members: members, tasks: tasks };
+      var graves = (next.graves && typeof next.graves === 'object' && !Array.isArray(next.graves))
+        ? next.graves : {};
+
+      return { members: members, tasks: tasks, graves: graves };
+    }
+
+    /* ---------------------------------------------- 2つの記録を混ぜる ---- */
+
+    function mergeList(mine, theirs, graves) {
+      var byId = {}, order = [];
+      theirs.forEach(function (r) { byId[r.id] = r; order.push(r.id); });
+      mine.forEach(function (r) {
+        var cur = byId[r.id];
+        if (!cur) { byId[r.id] = r; order.push(r.id); return; }
+        if ((r.updated || 0) > (cur.updated || 0)) byId[r.id] = r;
+      });
+      return order.map(function (id) { return byId[id]; })
+                  .filter(function (r) {
+                    var g = graves[r.id];
+                    return !(g && g >= (r.updated || 0));
+                  });
+    }
+
+    function mergeStates(mine, theirs) {
+      var graves = {};
+      [mine.graves || {}, theirs.graves || {}].forEach(function (g) {
+        Object.keys(g).forEach(function (k) { graves[k] = Math.max(graves[k] || 0, g[k]); });
+      });
+
+      var tasks = mergeList(mine.tasks, theirs.tasks, graves);
+      var mineById = {}, theirsById = {};
+      mine.tasks.forEach(function (t) { mineById[t.id] = t; });
+      theirs.tasks.forEach(function (t) { theirsById[t.id] = t; });
+      tasks.forEach(function (t) {
+        t.subs = mergeList((mineById[t.id] || {}).subs || [],
+                           (theirsById[t.id] || {}).subs || [], graves);
+      });
+
+      var sorted = {};
+      Object.keys(graves).sort().forEach(function (k) { sorted[k] = graves[k]; });
+
+      return { members: mergeList(mine.members, theirs.members, graves),
+               tasks: tasks, graves: sorted };
     }
 
     var stored = readStore(SCHEDULE_KEY, null);
@@ -581,12 +674,24 @@
     var sched = docEl.querySelector('#schedule');
     sched.parentNode.insertBefore(panel, sched.nextSibling);
 
+    // 共有は「押すもの」なので編集の側に置き、状態バーと設定を続けて並べる
+    var share = buildShare();
+    var summary = panel.querySelector('.prog-summary');
+    panel.insertBefore(share.el, summary);
+    panel.insertBefore(share.conf, summary);
+
+    // 記録の書き出しは置かない。共有が自動で回るので、手で受け渡す必要がない。
+
     var tbody = panel.querySelector('[data-prog-body]');
     var mbody = panel.querySelector('[data-member-body]');
     var splitBox = panel.querySelector('[data-split]');
     var vbody = view.querySelector('[data-view-body]');
 
-    function touch() { writeStore(SCHEDULE_KEY, state); }
+    function touch() {
+      writeStore(SCHEDULE_KEY, state);
+      share.queue();
+    }
+    function bury(id) { state.graves[id] = now(); }
 
     /* ================================================== 参照 ============= */
 
@@ -929,6 +1034,7 @@
           t.at = el.value === 'todo' ? '' : today();
         }
         t[el.dataset.t] = el.value;
+        t.updated = now();
         if (el.dataset.t === 'priority') el.dataset.pri = el.value;
         touch();
         paint();
@@ -941,6 +1047,8 @@
         var sub = owner && owner.subs[+row.dataset.j];
         if (!sub) return;
         sub[el.dataset.s] = el.type === 'checkbox' ? el.checked : el.value;
+        sub.updated = now();
+        owner.updated = now();
         row.classList.toggle('is-done', !!sub.done);
         touch();
         paint();
@@ -952,6 +1060,7 @@
         var m = state.members[+mr.dataset.i];
         if (!m) return;
         m[el.dataset.m] = el.value;
+        m.updated = now();
         touch();
         tbody.querySelectorAll('[data-t="assignee"] option[value="' + m.id + '"]').forEach(function (o) {
           o.textContent = m.name || '（名前なし）';
@@ -976,6 +1085,7 @@
         var ct = state.tasks[+btn.closest('tr').dataset.i];
         if (!ct) return;
         ct.color = btn.dataset.color;
+        ct.updated = now();
         btn.parentElement.querySelectorAll('.ph-sw').forEach(function (b) {
           var on = b === btn;
           b.classList.toggle('is-on', on);
@@ -989,24 +1099,29 @@
       if (btn.hasAttribute('data-add-task')) {
         state.tasks.push({ id: 'task-' + now(), name: '', detail: '', from: '', to: '',
                            color: freeColor(), assignee: '', priority: 'mid',
-                           status: 'todo', at: '', subs: [] });
+                           status: 'todo', at: '', subs: [], updated: now() });
       } else if (btn.hasAttribute('data-del-task')) {
         var goneT = state.tasks[+btn.closest('tr').dataset.i];
         if (!goneT) return;
+        bury(goneT.id);
+        goneT.subs.forEach(function (s) { bury(s.id); });
         state.tasks = state.tasks.filter(function (t) { return t !== goneT; });
       } else if (btn.hasAttribute('data-add-sub')) {
         var owner = state.tasks[+btn.closest('.split-card').dataset.i];
         if (!owner) return;
         owner.subs.push({ id: 'sub-' + now(), text: '', detail: '', from: '', to: '',
-                          done: false });
+                          done: false, updated: now() });
+        owner.updated = now();
       } else if (btn.hasAttribute('data-del-sub')) {
         var srow = btn.closest('tr');
         var host2 = state.tasks[+btn.closest('.split-card').dataset.i];
         if (!host2) return;
         var goneS = host2.subs[+srow.dataset.j];
+        if (goneS) bury(goneS.id);
         host2.subs = host2.subs.filter(function (s) { return s !== goneS; });
+        host2.updated = now();
       } else if (btn.hasAttribute('data-add-member')) {
-        state.members.push({ id: 'mem-' + now(), name: '' });
+        state.members.push({ id: 'mem-' + now(), name: '', updated: now() });
       } else if (btn.hasAttribute('data-del-member')) {
         var goneM = state.members[+btn.closest('tr').dataset.i];
         if (!goneM) return;
@@ -1014,14 +1129,17 @@
         if (held && !confirm('「' + (goneM.name || '名前なし') + '」が受け持つ作業が' + held + '件あります。\n' +
                              'それらは未割当になります。\n\nよろしいですか？')) return;
         state.tasks.forEach(function (t) {
-          if (t.assignee === goneM.id) t.assignee = '';
+          if (t.assignee === goneM.id) { t.assignee = ''; t.updated = now(); }
         });
+        bury(goneM.id);
         state.members = state.members.filter(function (m) { return m !== goneM; });
       } else if (btn.hasAttribute('data-clear-tasks')) {
         if (!state.tasks.length) return;
         if (!confirm('作業を' + state.tasks.length + '件すべて削除します。内容・小項目・進捗も消えます。\n' +
                      '（担当者は残ります）\n\nよろしいですか？')) return;
         state.tasks.forEach(function (t) {
+          bury(t.id);
+          t.subs.forEach(function (s) { bury(s.id); });
         });
         state.tasks = [];
       } else if (btn.hasAttribute('data-clear-members')) {
@@ -1032,15 +1150,306 @@
         if (!confirm('担当者を' + state.members.length + '人すべて削除します。\n' +
                      (assigned ? '作業' + assigned + '件は未割当になります。\n' : '') +
                      '（作業そのものは消えません）\n\nよろしいですか？')) return;
+        state.members.forEach(function (m) { bury(m.id); });
         state.members = [];
-        state.tasks.forEach(function (t) { t.assignee = ''; });
+        state.tasks.forEach(function (t) { t.assignee = ''; t.updated = now(); });
       } else return;
 
       touch();
       rebuild();
     });
 
+    /* ================================================== 共有 ============= */
+
+    function buildShare() {
+      // 状態の欄は、言うことがあるときだけ出す。
+      // うまくいっているとき・トークンを入れていないときは何も出さない。
+      var bar = document.createElement('div');
+      bar.className = 'share';
+      bar.hidden = true;
+      bar.innerHTML =
+        '<div class="share-bar"><span class="share-state" data-share-state></span></div>';
+
+      var conf = document.createElement('details');
+      conf.className = 'share-conf';
+      conf.innerHTML =
+        '<summary>共有の設定<span class="chat-key-state" data-share-conf-state>未設定</span></summary>' +
+        '<p class="chat-key-note">' +
+          '書き換えると<strong>自動で3人に反映されます</strong>（数秒後に送られ、' +
+          '他の人の変更も定期的に取り込まれます）。' +
+          '内容は GitHub のファイルに置きますが、サイトと同じパスワードで暗号化するので' +
+          'リポジトリを見ても読めません。' +
+          '<br><strong>書き込むにはアクセストークンが必要です。</strong>' +
+          '無いときは自分の画面にだけ残ります（他の人の変更を受け取るのはトークン無しでもできます）。' +
+          '<br>他の人の画面に出るまで、送ってから1〜2分ほどかかります。' +
+        '</p>' +
+        '<label class="share-field"><span>あなたの名前</span>' +
+          '<input type="text" data-share-name placeholder="例）きょうすけ" spellcheck="false"></label>' +
+        '<label class="share-field"><span>アクセストークン</span>' +
+          '<input type="password" data-share-token placeholder="github_pat_… / ghp_…" spellcheck="false" autocomplete="off"></label>' +
+        '<div class="prog-io-btns">' +
+          '<button type="button" data-share-save>設定を保存</button>' +
+          '<button type="button" data-share-clear>トークンを消す</button>' +
+          '<button type="button" data-share-now>今すぐ同期</button>' +
+        '</div>' +
+        '<p class="prog-io-msg" data-share-msg role="status" aria-live="polite"></p>';
+
+      var stateEl = bar.querySelector('[data-share-state]');
+      var msgEl   = conf.querySelector('[data-share-msg]');
+      var nameEl  = conf.querySelector('[data-share-name]');
+      var tokenEl = conf.querySelector('[data-share-token]');
+      var confEl  = conf.querySelector('[data-share-conf-state]');
+
+      var token = '', myName = '', sha = null, remote = null;
+      var pushTimer = null, pullTimer = null, busy = false, pending = false;
+      var lastSent = '';
+
+      try {
+        token  = localStorage.getItem(GH_TOKEN_KEY) || '';
+        myName = localStorage.getItem(MYNAME_KEY) || '';
+      } catch (e) {}
+      tokenEl.value = token;
+      nameEl.value = myName;
+
+      function confState() {
+        confEl.textContent = token ? '設定済み' : '未設定';
+        confEl.className = 'chat-key-state' + (token ? ' is-on' : '');
+      }
+      confState();
+
+      function msg(t) { msgEl.textContent = t; setTimeout(function () { msgEl.textContent = ''; }, 5000); }
+      // 空文字を渡すと欄ごと消える
+      function say(t, kind) {
+        bar.hidden = !t;
+        stateEl.textContent = t;
+        stateEl.className = 'share-state' + (kind ? ' is-' + kind : '');
+      }
+      // 待っているだけのときは黙っている。うまくいっている報告も要らない。
+      function idle() { say(''); }
+
+      function headers(extra) {
+        var h = { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+        if (token) h.Authorization = 'Bearer ' + token;
+        if (extra) Object.keys(extra).forEach(function (k) { h[k] = extra[k]; });
+        return h;
+      }
+      function apiUrl() {
+        return 'https://api.github.com/repos/' + preset.share.repo + '/contents/' + preset.share.path;
+      }
+      function netError(err) {
+        var m = err && err.message ? err.message : String(err);
+        return /failed to fetch|networkerror|load failed/i.test(m)
+          ? 'ネットにつながりません' : m;
+      }
+      function ghError(status) {
+        if (status === 401) return 'トークンが正しくないようです（401）';
+        if (status === 403) return 'このトークンでは書き込めません（403）';
+        if (status === 404) return '共有ファイルがありません（404）';
+        return 'GitHub でエラー（' + status + '）';
+      }
+
+      // 封筒を開ける。中身はサイトと同じパスワードで暗号化してある
+      function openEnvelope(env) {
+        return decryptBlob(sessionPassword(), env).then(function (text) {
+          return { savedBy: env.savedBy || '', savedAt: env.savedAt || '',
+                   data: JSON.parse(text) };
+        });
+      }
+
+      // 読むだけなら、サイトに置いてあるファイルをそのまま見る。
+      // GitHub の API は1時間あたりの回数が決まっていて、トークンの無い人が
+      // 定期的に叩くとすぐ止められてしまうため、こちらを先に試す。
+      function fetchFromSite() {
+        return fetch(preset.share.path + '?t=' + Date.now(), { cache: 'no-store' })
+          .then(function (res) {
+            if (!res.ok) return null;
+            return res.text().then(function (t) {
+              var env = null;
+              try { env = JSON.parse(t); } catch (e) { return null; }
+              // 中身が封筒でなければ（404ページなど）読めなかった扱いにする
+              if (!env || !env.ct || !env.salt) return null;
+              return openEnvelope(env);
+            });
+          }, function () { return null; });
+      }
+
+      // サイト側から読めないとき（GitHub Pages を使っていない・手元で開いた等）の控え
+      function fetchFromApi() {
+        return fetch(apiUrl() + '?ref=' + encodeURIComponent(preset.share.branch) + '&t=' + Date.now(),
+                     { headers: headers(), cache: 'no-store' })
+          .then(function (res) {
+            if (res.status === 404) { sha = null; return null; }
+            if (!res.ok) throw new Error(ghError(res.status));
+            return res.json().then(function (j) {
+              sha = j.sha;
+              var raw = atob(String(j.content || '').replace(/\s/g, ''));
+              var bytes = new Uint8Array(raw.length);
+              for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+              return openEnvelope(JSON.parse(new TextDecoder().decode(bytes)));
+            });
+          });
+      }
+
+      // 控えの API を叩くのはトークンがある人だけ。トークン無しで定期的に叩くと
+      // 回数制限（1時間60回）に当たって、しばらく何も読めなくなる。
+      function fetchRemote() {
+        return fetchFromSite().then(function (r) {
+          if (r) return r;
+          return token ? fetchFromApi() : null;
+        });
+      }
+
+      // 上書きするには、いま置いてあるファイルの sha が要る。
+      // サイト側から読んだときは分からないので、送る直前にここで取りに行く。
+      function ensureSha() {
+        if (sha) return Promise.resolve(sha);
+        return fetch(apiUrl() + '?ref=' + encodeURIComponent(preset.share.branch) + '&t=' + Date.now(),
+                     { headers: headers(), cache: 'no-store' })
+          .then(function (res) {
+            if (res.status === 404) { sha = null; return null; }   // まだファイルが無い＝新規作成
+            if (!res.ok) throw new Error(ghError(res.status));
+            return res.json().then(function (j) { sha = j.sha; return sha; });
+          });
+      }
+
+      // 入力中に作り直すとカーソルが飛ぶので、手が止まるまで待って描き直す。
+      // 待つのは「画面の作り直し」だけで、送受信そのものは止めない。
+      var redrawTimer = null;
+      function editing() {
+        var a = document.activeElement;
+        return !!(a && panel.contains(a) &&
+                  /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'checkbox');
+      }
+      function safeRebuild() {
+        clearTimeout(redrawTimer);
+        if (editing()) { redrawTimer = setTimeout(safeRebuild, 800); return; }
+        rebuild();
+      }
+
+      function sync(force) {
+        if (busy) { pending = true; return Promise.resolve(); }
+        busy = true;
+        return fetchRemote()
+          .then(function (r) {
+            var theirs = r ? normalize(r.data) : null;
+            // 相手の内容と自分の内容を突き合わせる（作業ごとに新しいほうを採る）
+            var merged = theirs ? mergeStates(state, theirs) : state;
+
+            var before = JSON.stringify(state);
+            var after  = JSON.stringify(merged);
+
+            if (after !== before) {
+              state = merged;
+              writeStore(SCHEDULE_KEY, state);
+              safeRebuild();
+            }
+
+            // 混ぜた結果が相手のものと同じなら、送る必要はない
+            if (theirs && after === JSON.stringify(theirs)) { lastSent = after; idle(); return; }
+            if (!token) { idle(); return; }
+            if (after === lastSent) { idle(); return; }
+            return push(after);
+          })
+          .catch(function (err) { say('共有：' + netError(err), 'warn'); })
+          .then(function () {
+            busy = false;
+            if (pending) { pending = false; setTimeout(function () { sync(false); }, 400); }
+          });
+      }
+
+      function push(text) {
+        var pw = sessionPassword();
+        if (!pw) { say('共有：パスワードが取り出せません', 'warn'); return; }
+        var stamp = stampNow();
+        return Promise.all([encryptText(pw, text), ensureSha()]).then(function (r) {
+          var blob = r[0];
+          blob.savedBy = myName || '（名前なし）';
+          blob.savedAt = stamp;
+          var body = { message: '予定を更新（' + blob.savedBy + '）',
+                       content: utf8ToB64(JSON.stringify(blob)),
+                       branch: preset.share.branch };
+          if (sha) body.sha = sha;
+          return fetch(apiUrl(), { method: 'PUT',
+                                   headers: headers({ 'Content-Type': 'application/json' }),
+                                   body: JSON.stringify(body) });
+        }).then(function (res) {
+          if (res.status === 409 || res.status === 422) {
+            // ほかの人が先に保存していた。sha を取り直し、混ぜてから次の周回で送る
+            sha = null;
+            pending = true;
+            say('共有：ほかの人の変更を取り込んでいます…');
+            return;
+          }
+          if (!res.ok) throw new Error(ghError(res.status));
+          return res.json().then(function (j) {
+            sha = j.content && j.content.sha;
+            lastSent = text;
+            remote = { savedBy: myName || '（名前なし）', savedAt: stamp };
+            idle();
+          });
+        });
+      }
+
+      conf.querySelector('[data-share-now]').addEventListener('click', function () { sync(true); });
+
+      conf.querySelector('[data-share-save]').addEventListener('click', function () {
+        token = tokenEl.value.trim();
+        myName = nameEl.value.trim();
+        try {
+          if (token) localStorage.setItem(GH_TOKEN_KEY, token); else localStorage.removeItem(GH_TOKEN_KEY);
+          localStorage.setItem(MYNAME_KEY, myName);
+        } catch (e) {}
+        confState();
+        msg('保存しました');
+        sync(true);
+      });
+
+      conf.querySelector('[data-share-clear]').addEventListener('click', function () {
+        token = '';
+        tokenEl.value = '';
+        try { localStorage.removeItem(GH_TOKEN_KEY); } catch (e) {}
+        confState();
+        msg('消しました');
+        idle();
+      });
+
+      return {
+        el: bar,
+        conf: conf,
+        // 書き換えのたびに呼ばれる。連打しても数秒に1回だけ送る
+        queue: function () {
+          clearTimeout(pushTimer);
+          pushTimer = setTimeout(function () { sync(false); }, 2500);
+        },
+        start: function () {
+          sync(true);
+          pullTimer = setInterval(function () { sync(false); }, 25000);
+          // タブに戻ってきたときも取り込む
+          document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) sync(false);
+          });
+        }
+      };
+    }
+
     rebuild();
+    share.start();
+  }
+
+  function stampNow() {
+    var d = new Date();
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '/' + p2(d.getMonth() + 1) + '/' + p2(d.getDate()) +
+           ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+  }
+
+  function utf8ToB64(str) {
+    var bytes = new TextEncoder().encode(str);
+    var out = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(out);
   }
 
   /* ----------------------------------------------------- 小さな道具 */
@@ -2154,17 +2563,6 @@
     var side   = document.getElementById('side');
     var scrim  = document.getElementById('scrim');
     var toggle = document.getElementById('nav-toggle');
-    var topbar = document.querySelector('.topbar');
-
-    // ページ切り替えの帯を、上の帯のすぐ下で止める。
-    // 上の帯はスマホ幅でだけ出るので、高さは実測して渡す。
-    function topbarHeight() {
-      var h = (topbar && getComputedStyle(topbar).display !== 'none') ? topbar.offsetHeight : 0;
-      document.documentElement.style.setProperty('--topbar-h', h + 'px');
-    }
-    // ここではまだ本文が隠れていて高さが 0 になるので、表示された次の描画で測る
-    requestAnimationFrame(topbarHeight);
-    window.addEventListener('resize', topbarHeight);
 
     function close() { side.classList.remove('open'); scrim.classList.remove('show'); }
 
