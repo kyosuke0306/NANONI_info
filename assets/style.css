@@ -57,7 +57,7 @@
 * { box-sizing: border-box; }
 
 /* 閉じている折りたたみの中身は出さない。
-   中の要素に display を指定すると（.share-field の grid、.prog-io-btns の flex など）
+   中の要素に display を指定すると（.prog-io-btns の flex など）
    ブラウザ既定の「閉じているあいだは隠す」が効かなくなり、
    下にある表や図の上に文字が重なって出てしまう。 */
 details:not([open]) > *:not(summary) { display: none; }
@@ -1855,53 +1855,6 @@ h3::before {
   border-radius: 999px;
 }
 .bm-empty { margin: 0; font-size: 12px; color: var(--muted); }
-
-/* --- 3人で共有する --- */
-
-/* 状態の欄はふだん出ないので、設定の箱とは切り離して単体で成り立たせる */
-.share { margin: 16px 0 10px; }
-
-.share-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 11px 14px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.share-state { font-size: 12.5px; color: var(--ink-2); }
-.share-state.is-ok   { color: var(--green); }
-.share-state.is-warn { color: var(--amber); font-weight: 700; }
-
-.share-conf {
-  margin: 16px 0 22px;
-  padding: 11px 14px;
-  background: var(--bg-tint);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  font-size: 13px;
-}
-.share-conf > summary { cursor: pointer; font-weight: 700; font-size: 12.5px; }
-
-.share-field { display: grid; gap: 4px; margin: 10px 0; }
-.share-field > span { font-size: 11px; letter-spacing: .06em; color: var(--muted); }
-.share-field input {
-  padding: 8px 11px;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-}
-.share-field input:focus { outline: 0; border-color: var(--accent); }
-
-@media print {
-  .share, .share-conf { display: none; }
-}
 
 /* --- 色見本（作業の色を選ぶ） --- */
 
