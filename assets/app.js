@@ -2563,6 +2563,17 @@
     var side   = document.getElementById('side');
     var scrim  = document.getElementById('scrim');
     var toggle = document.getElementById('nav-toggle');
+    var topbar = document.querySelector('.topbar');
+
+    // ページ切り替えの帯を、上の帯のすぐ下で止める。
+    // 上の帯はスマホ幅でだけ出るので、高さは実測して渡す。
+    function topbarHeight() {
+      var h = (topbar && getComputedStyle(topbar).display !== 'none') ? topbar.offsetHeight : 0;
+      document.documentElement.style.setProperty('--topbar-h', h + 'px');
+    }
+    // ここではまだ本文が隠れていて高さが 0 になるので、表示された次の描画で測る
+    requestAnimationFrame(topbarHeight);
+    window.addEventListener('resize', topbarHeight);
 
     function close() { side.classList.remove('open'); scrim.classList.remove('show'); }
 

@@ -340,40 +340,50 @@ a:hover { border-bottom-color: var(--accent); }
 /* --- ページの切り替え --- */
 
 /* 「スケジュール」「第2ロット」は横に並べると入らないので縦積み */
-.mode-switch {
-  display: grid;
-  grid-template-columns: 1fr;
+/* ページの切り替え。目次を開かなくても押せるよう、本文の先頭に貼り付けておく。
+   --topbar-h は上の帯の高さで、app.js が実測して入れる（スマホでは帯が出る）。 */
+.pagebar {
+  position: sticky;
+  top: var(--topbar-h, 0px);
+  z-index: 30;
+  display: flex;
   gap: 2px;
-  margin-top: 12px;
+  margin: 0 0 22px;
   padding: 3px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface);
 }
+.pagebar::-webkit-scrollbar { display: none; }
 
-.mode-switch a {
-  padding: 5px 4px;
+.pagebar a {
+  flex: 1 0 auto;
+  padding: 6px 12px;
   border-radius: 6px;
   border-bottom: 0;
   text-align: center;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--ink-2);
   transition: background .13s, color .13s;
 }
-.mode-switch a:hover { background: var(--accent-bg); color: var(--accent); }
+.pagebar a:hover { background: var(--accent-bg); color: var(--accent); }
 
-.mode-switch a.is-current {
+.pagebar a.is-current {
   background: #2f2a22;
   color: #fff;
   font-weight: 700;
 }
 @media (prefers-color-scheme: dark) {
-  .mode-switch a.is-current { background: var(--accent); color: #1a190f; }
+  .pagebar a.is-current { background: var(--accent); color: #1a190f; }
 }
 
-.mode-switch a.is-current:hover { background: #2f2a22; color: #fff; }
+.pagebar a.is-current:hover { background: #2f2a22; color: #fff; }
 @media (prefers-color-scheme: dark) {
-  .mode-switch a.is-current:hover { background: var(--accent); color: #1a190f; }
+  .pagebar a.is-current:hover { background: var(--accent); color: #1a190f; }
 }
 
 .side-foot {
