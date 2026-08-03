@@ -365,7 +365,6 @@ assets/style.css        スタイル（ライト/ダーク・印刷対応）
 assets/app.js           復号・目次生成・スクロール連動・キーワード絞り込み
 assets/icon-src.png     アイコンの原本（1024×1024。これを差し替えて PNG を作り直す）
 assets/icon-*.png       32/180/192/512。180 は iOS、192・512 は Android が使う
-assets/icon-dark-*.png  暗い画面むけ（明暗を入れ替えたもの）。原本から自動で作られる
 tools/build.py          暗号化 / 復号ツール
 tools/make-icons.js     icon-src.png から各サイズの PNG を生成する
 src/content.html        本文の平文（.gitignore 対象。commit されません）
@@ -377,42 +376,22 @@ src/content.html        本文の平文（.gitignore 対象。commit されま�
 
 ```bash
 npm install playwright-core     # 初回のみ
-node tools/make-icons.js        # icon-src.png → 明暗2組 × 4サイズ
+node tools/make-icons.js        # icon-src.png → icon-32/180/192/512.png
 ```
 
-原本は **1024×1024 の正方形**で、**白い背景に黒い絵柄**、**不透明**にしてください
+原本は **1024×1024 の正方形**で、**背景を不透明**にしてください
 （iOS は透明部分を黒で塗りつぶします）。
 角丸は付けないこと。iOS も Android も端末側で角を丸めます。
-
-#### 暗い画面むけ（`icon-dark-*.png`）
-
-**白い地に黒い絵柄のままだと、端末が暗い表示のときに薄く見えます。**
-iOS は暗い表示のときアイコン全体を暗く落とすので、白い地が灰色になり、
-その上の黒い絵柄が沈んでしまうためです。
-
-そこで、原本の白と黒を**サイトの暗い配色**（`--bg` `#16150f` / `--ink` `#ece7dc`）に
-置き換えた組を、`make-icons.js` が自動で作ります。原本は1つのままです。
-
-| | 明るい画面 | 暗い画面 |
-|---|---|---|
-| 地 | 白 | `#16150f` |
-| 絵柄 | 黒 | `#ece7dc` |
-
-切り替えは `media="(prefers-color-scheme: …)"` で指定しています。
-**media 指定なしの控えは置いていません。**置くとどちらの画面でも一致してしまい、
-あとに書いたほうが勝って切り替わらなくなるためです。
-`apple-touch-icon` は暗い側を最後に書いてあります（media を見ない環境では
-最後の1つが使われるため。暗い地に明るい絵柄のほうが、どんな壁紙でも沈みません）。
 
 アイコンの割り当ては次のとおりです。
 
 | 対象 | 使われるファイル | 指定場所 |
 |---|---|---|
-| iOS（ホーム画面） | `assets/icon-180.png`（暗い表示では `icon-dark-180.png`） | `index.html` の `apple-touch-icon` |
+| iOS（ホーム画面） | `assets/icon-180.png` | `index.html` の `apple-touch-icon` |
 | iOS（アイコン下の名前） | — | `index.html` の `apple-mobile-web-app-title` |
 | Android Chrome | `assets/icon-192.png` / `icon-512.png` | `manifest.webmanifest` |
 | Android（表示名） | — | `manifest.webmanifest` の `short_name` |
-| ブラウザのタブ | `assets/icon-32.png` / `icon-192.png`（暗い画面では `icon-dark-*`） | `index.html` の `rel="icon"` |
+| ブラウザのタブ | `assets/icon-32.png` / `icon-192.png` | `index.html` の `rel="icon"` |
 
 > **iOS は manifest を見ません。** `apple-touch-icon` の PNG がないと、
 > ホーム画面にはページのスクリーンショットが縮小されて置かれます。
