@@ -7,13 +7,21 @@
 <meta name="referrer" content="no-referrer">
 <title>NANONI / 24CLUB — 関係者限定（簡易版）</title>
 
-<!-- ブラウザのタブ用。絵柄が画像なので SVG は置かず PNG だけにしてある -->
-<link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="assets/icon-192.png" sizes="192x192" type="image/png">
+<!-- ブラウザのタブ用。絵柄が画像なので SVG は置かず PNG だけにしてある。
+     暗い画面では明暗を入れ替えたほう（icon-dark-*）を使う。
+     media 指定なしの控えは置かない。置くとどちらの画面でも一致してしまい、
+     あとに書いたほうが勝って切り替わらなくなるため。 -->
+<link rel="icon" href="assets/icon-32.png"       sizes="32x32"   type="image/png" media="(prefers-color-scheme: light)">
+<link rel="icon" href="assets/icon-192.png"      sizes="192x192" type="image/png" media="(prefers-color-scheme: light)">
+<link rel="icon" href="assets/icon-dark-32.png"  sizes="32x32"   type="image/png" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="assets/icon-dark-192.png" sizes="192x192" type="image/png" media="(prefers-color-scheme: dark)">
 
 <!-- iOS：ホーム画面に追加したときのアイコンと名前。iOS は manifest を見ないので
-     apple-touch-icon（180×180 PNG）が必須 -->
-<link rel="apple-touch-icon" href="assets/icon-180.png">
+     apple-touch-icon（180×180 PNG）が必須。
+     media を見ない環境では最後の1つが使われる。暗い側を最後に置いてあるのは、
+     暗い地色に明るい絵柄のほうが、どんな壁紙・明るさでも沈まないため。 -->
+<link rel="apple-touch-icon" href="assets/icon-180.png"      media="(prefers-color-scheme: light)">
+<link rel="apple-touch-icon" href="assets/icon-dark-180.png" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-title" content="NANONI">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
