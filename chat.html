@@ -7,26 +7,14 @@
 <meta name="referrer" content="no-referrer">
 <title>NANONI / 24CLUB — AIに質問する</title>
 
-<!-- アイコンはすべて、白い紙に重ねてアルファを捨てた PNG。
-     透明を残すと iOS がそこを黒く塗りつぶし、黒い四角になってしまう。 -->
-
-<!-- ブラウザのタブ用 -->
+<!-- アイコンの指定は NANONI_home（同じ絵柄で綺麗に出ているサイト）と同じ並びにしてある。
+     余計なものを足すと出方が変わるので、増やさないこと。
+     画像はすべて、白い紙に重ねてアルファを捨てた PNG
+     （透明を残すと iOS がそこを黒く塗りつぶす）。 -->
 <link rel="icon" href="assets/icon-192.png" sizes="192x192" type="image/png">
-
-<!-- iOS：ホーム画面に追加したときのアイコンと名前。
-     これが無いと iOS はページのスクショを縮小して使う。
-
-     「アプリとして開く」指定（apple-mobile-web-app-capable / manifest の
-     display:standalone）は付けない。付けると iOS がアプリ扱いにして、
-     端末が暗い外観のときアイコンを勝手に暗く落としてしまう。 -->
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<!-- precomposed ＝「もう仕上げてあるので、そちらで加工しないで」という指示。
-     これが無いと iOS がつやや影を足し、べったりした黒が灰色に見えることがある。 -->
-<link rel="apple-touch-icon-precomposed" href="assets/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-title" content="NANONI">
-
-<!-- Android Chrome：アイコンと表示名は site.webmanifest 側 -->
 <link rel="manifest" href="site.webmanifest">
+<meta name="apple-mobile-web-app-title" content="NANONI">
 <meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#16150f" media="(prefers-color-scheme: dark)">
 

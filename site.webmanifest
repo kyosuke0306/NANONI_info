@@ -3,7 +3,6 @@
   "short_name": "NANONI",
   "description": "NANONI / 24CLUB の関係者限定 事業情報",
   "lang": "ja",
-  "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "minimal-ui",
