@@ -66,5 +66,20 @@ const launchOptions = fs.existsSync(BUNDLED) ? { executablePath: BUNDLED } : {};
   }
 
   await browser.close();
+
+  // タブ用の favicon は SVG にする。
+  // 小さい PNG を favicon にすると、iOS がホーム画面のアイコンを
+  // その小さい画像から作ってしまい、引き伸ばされてぼける。
+  // SVG なら何倍に描かれても大きさに縛られない。
+  // 絵柄は図形ではなく画像なので、512px の PNG を中に埋め込んでいる。
+  const b64 = fs.readFileSync(path.join(ASSETS, 'icon-512.png')).toString('base64');
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NANONI">\n' +
+    '  <rect width="512" height="512" fill="#ffffff"/>\n' +
+    `  <image x="0" y="0" width="512" height="512" href="data:image/png;base64,${b64}"/>\n` +
+    '</svg>\n';
+  fs.writeFileSync(path.join(ASSETS, 'favicon.svg'), svg);
+  console.log(`書き出し: assets/favicon.svg (${(svg.length / 1024).toFixed(0)}KB)`);
+
   console.log('\n完了。端末で確認するときはホーム画面から削除して追加し直してください。');
 })();

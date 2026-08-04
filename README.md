@@ -365,7 +365,8 @@ assets/style.css        スタイル（ライト/ダーク・印刷対応）
 assets/app.js           復号・目次生成・スクロール連動・キーワード絞り込み
 assets/icon-src.png     アイコンの原本（1024×1024。これを差し替えて PNG を作り直す）
 assets/apple-touch-icon.png  512px。iOS のホーム画面
-assets/icon-192.png     タブと Android
+assets/favicon.svg      ブラウザのタブ（512px の PNG を埋め込んだもの）
+assets/icon-192.png     Android
 assets/icon-512.png     Android（スプラッシュ・丸マスク兼用）
 tools/build.py          暗号化 / 復号ツール
 tools/make-icons.js     icon-src.png から各サイズの PNG を生成する
@@ -416,7 +417,15 @@ python3 tools/check-icons.py    # 書き出したものを確かめる
 | iOS（アイコン下の名前） | — | `index.html` の `apple-mobile-web-app-title` |
 | Android Chrome | `assets/icon-192.png` / `icon-512.png` | `site.webmanifest` |
 | Android（表示名） | — | `site.webmanifest` の `short_name` |
-| ブラウザのタブ | `assets/icon-192.png` | `index.html` の `rel="icon"` |
+| ブラウザのタブ | `assets/favicon.svg` | `index.html` の `rel="icon"` |
+
+> **タブ用は SVG にしてあります。** 小さい PNG を favicon にすると、
+> **iOS がホーム画面のアイコンをその小さい画像から作ってしまい**、
+> 引き伸ばされてぼけます。実機で観測したふちの幅 5.8画素は、
+> 32px を 180px へ引き伸ばしたとき（5.2画素）とほぼ一致していました。
+> SVG なら何倍に描かれても大きさに縛られません。
+> 絵柄は図形ではなく画像なので、512px の PNG を中に埋め込んでいます
+> （`make-icons.js` が自動で作ります）。
 
 > **iOS は manifest を見ません。** `apple-touch-icon` の PNG がないと、
 > ホーム画面にはページのスクリーンショットが縮小されて置かれます。
