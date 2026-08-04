@@ -19,7 +19,7 @@ assets/icon-src.png から、ホーム画面アイコン用の PNG を書き出�
     512×512 を置いたら、iOS がぼかして描いた。
   * 色は RGB のまま扱う。白黒（グレースケール）に変換しない。
   * 縮小は Pillow の LANCZOS でおこなう。
-  * 白い紙に重ねてアルファを捨てる
+  * 地の色は四隅から読み取る。その色の紙に重ねてアルファを捨てる
     （透明を残すと iOS がそこを黒く塗りつぶす）。
 
 原本は 1024×1024 の正方形にすること。角丸は付けない（端末側で丸められる）。
@@ -48,13 +48,14 @@ def main():
 
     src = Image.open(SRC)
 
-    # 白い紙に重ねてアルファを捨てる。RGB のまま扱う（白黒に変換しない）
-    base = Image.new("RGB", src.size, (255, 255, 255))
-    base.paste(src, (0, 0), src if src.mode in ("RGBA", "LA", "PA") else None)
+    # 地の色は四隅から読み取る（白地でも暗い地でも同じ手順で扱えるように）
+    probe = src.convert("RGB")
+    w, h = probe.size
+    bg = probe.getpixel((0, 0))
 
-    # 取り込みのムラで、白いはずの地が 253 などになっていることがある。
-    # ほぼ白（248以上）のところだけを白に寄せる。絵柄とふちの中間色には触らない。
-    base = base.point(lambda v: 255 if v >= 248 else v)
+    # その色の紙に重ねてアルファを捨てる。RGB のまま扱う（白黒に変換しない）
+    base = Image.new("RGB", src.size, bg)
+    base.paste(src, (0, 0), src if src.mode in ("RGBA", "LA", "PA") else None)
 
     for size, name in OUT:
         im = base.resize((size, size), Image.LANCZOS)

@@ -10,8 +10,8 @@
   1. アルファ（透明）が残っていないか
      iOS は透明部分を黒で塗りつぶすので、残っていると黒い四角になる。
 
-  2. 四隅が白いか
-     白い紙の上にちゃんと重なっているか。
+  2. 四隅が同じ色か
+     地がべた塗りになっているか（白でも暗い色でもよい）。
 
   3. 絵柄が中心から半径40%の円に収まっているか
      Android は丸く切り抜く（maskable）。はみ出すと欠ける。
@@ -29,7 +29,7 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 FILES = ["icon-src.png", "apple-touch-icon.png", "icon-192.png", "icon-512.png"]
 
 SAFE_RATIO = 0.40      # 丸マスクの安全圏。中心から「一辺 × 0.40」まで
-WHITE = 248            # これ以上は白＝背景とみなす（make-icons.py と同じ）
+NEAR = 12              # 地の色とこれくらい近ければ「地」とみなす
 
 
 def check(path):
@@ -43,20 +43,19 @@ def check(path):
 
     rgb = im.convert("RGB")
     w, h = rgb.size
-    # 原本は撮り込みのムラで 253 などになっていることがある。
-    # make-icons.py が白に寄せるので、ほぼ白なら通す。
+    # 地の色は四隅から読み取る。白地でも暗い地でも同じように確かめられる。
     corners = [rgb.getpixel(p) for p in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]]
-    if not all(min(c) >= WHITE for c in corners):
-        ng.append(f"四隅が白くない {corners}")
+    bg = corners[0]
+    if not all(max(abs(a - b) for a, b in zip(c, bg)) <= NEAR for c in corners):
+        ng.append(f"四隅の色がそろっていない {corners}")
 
-    # 中心からいちばん遠い「白でない点」を探す
-    g = rgb.convert("L")
-    px = g.load()
+    # 中心からいちばん遠い「地の色でない点」を探す
+    px = rgb.load()
     cx = cy = (size - 1) / 2
     far = 0.0
     for y in range(h):
         for x in range(w):
-            if px[x, y] < WHITE:
+            if max(abs(a - b) for a, b in zip(px[x, y], bg)) > NEAR:
                 d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
                 if d > far:
                     far = d
@@ -68,7 +67,7 @@ def check(path):
 
     state = "OK" if not ng else "NG"
     print(f"[{state}] {path.name:<22} {size}x{size} {im.mode}"
-          f"  透明なし={not has_alpha}"
+          f"  透明なし={not has_alpha}  地={bg}"
           f"  絵柄の広がり={ratio:.1%}（上限 {SAFE_RATIO:.0%}）")
     for m in ng:
         print(f"       → {m}")
