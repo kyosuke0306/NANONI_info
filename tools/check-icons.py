@@ -43,8 +43,10 @@ def check(path):
 
     rgb = im.convert("RGB")
     w, h = rgb.size
+    # 原本は撮り込みのムラで 253 などになっていることがある。
+    # make-icons.py が白に寄せるので、ほぼ白なら通す。
     corners = [rgb.getpixel(p) for p in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]]
-    if not all(c == (255, 255, 255) for c in corners):
+    if not all(min(c) >= 250 for c in corners):
         ng.append(f"四隅が白くない {corners}")
 
     # 中心からいちばん遠い「白でない点」を探す
