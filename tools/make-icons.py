@@ -53,8 +53,8 @@ def main():
     base.paste(src, (0, 0), src if src.mode in ("RGBA", "LA", "PA") else None)
 
     # 取り込みのムラで、白いはずの地が 253 などになっていることがある。
-    # ほぼ白のところだけを白に寄せる。絵柄とふちの中間色には触らない。
-    base = base.point(lambda v: 255 if v >= 250 else v)
+    # ほぼ白（248以上）のところだけを白に寄せる。絵柄とふちの中間色には触らない。
+    base = base.point(lambda v: 255 if v >= 248 else v)
 
     for size, name in OUT:
         im = base.resize((size, size), Image.LANCZOS)

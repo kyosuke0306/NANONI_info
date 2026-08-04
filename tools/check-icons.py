@@ -29,7 +29,7 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 FILES = ["icon-src.png", "apple-touch-icon.png", "icon-192.png", "icon-512.png"]
 
 SAFE_RATIO = 0.40      # 丸マスクの安全圏。中心から「一辺 × 0.40」まで
-WHITE = 250            # これ以上は白＝背景とみなす
+WHITE = 248            # これ以上は白＝背景とみなす（make-icons.py と同じ）
 
 
 def check(path):
@@ -46,7 +46,7 @@ def check(path):
     # 原本は撮り込みのムラで 253 などになっていることがある。
     # make-icons.py が白に寄せるので、ほぼ白なら通す。
     corners = [rgb.getpixel(p) for p in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]]
-    if not all(min(c) >= 250 for c in corners):
+    if not all(min(c) >= WHITE for c in corners):
         ng.append(f"四隅が白くない {corners}")
 
     # 中心からいちばん遠い「白でない点」を探す
