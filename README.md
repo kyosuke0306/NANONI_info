@@ -396,19 +396,29 @@ node tools/make-icons.js        # icon-src.png → icon-32/180/192/512.png
 > **iOS は manifest を見ません。** `apple-touch-icon` の PNG がないと、
 > ホーム画面にはページのスクリーンショットが縮小されて置かれます。
 
-#### 暗い外観のときに白い地が灰色になる件
+#### 「アプリとして開く」指定は付けません
 
-端末を**暗い外観**にしていると、iOS はホーム画面のアイコンを勝手に暗く落とします。
-白い地に黒い絵柄のアイコンは、地が灰色になって絵柄が沈み、薄く見えます。
+付けると、**端末が暗い外観のとき iOS がアイコンを勝手に暗く落とします。**
+白い地が灰色になり、その上の黒い絵柄が沈んで薄く見えます。
+画像は白いままなので、直すには指定のほうを外すしかありません。
 
-サイト側が**暗い外観むけのアイコンを明示していれば、そちらがそのまま使われて加工されません。**
-そこで `media="(prefers-color-scheme: dark)"` を足し、**同じ白いアイコン**を指しています。
-明るい外観でも暗い外観でも白いまま出したいので、わざと同じファイルです。
+外してあるのは次の3つです。
 
-```html
-<link rel="apple-touch-icon" href="assets/icon-180.png">
-<link rel="apple-touch-icon" href="assets/icon-180.png" media="(prefers-color-scheme: dark)">
-```
+| 外したもの | 何をするものだったか |
+|---|---|
+| `<meta name="apple-mobile-web-app-capable" content="yes">` | iOS でアプリのように全画面で開く |
+| `<meta name="apple-mobile-web-app-status-bar-style" …>` | 上記のときの時計まわりの色 |
+| `<meta name="mobile-web-app-capable" content="yes">` | Android 側の同じ指定 |
+
+manifest の `display` も `standalone` から **`minimal-ui`** にしてあります。
+`standalone` のままだと、meta を外しても Safari が manifest を見てアプリ扱いにするためです。
+
+> 同じ絵柄・同じ白背景で白いまま出ている `kyosuke0306/NANONI_home` に合わせた形です。
+> あちらもこれらの指定を持たず、`display` は `minimal-ui` です。
+
+**代わりに、ホーム画面から開くと Safari の細い操作バーが出ます**（全画面では開きません）。
+全画面のほうがよければ `apple-mobile-web-app-capable` を戻せますが、
+そのときはアイコンが暗く落とされる状態にも戻ります。
 
 > それでも暗いままのときは、端末側の設定が優先されています。
 > ホーム画面を長押し →「編集」→「カスタマイズ」で、アイコンの外観が
