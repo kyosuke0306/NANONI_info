@@ -6,14 +6,19 @@
  *   node tools/make-icons.js
  *
  * 生成されるもの
- *   icon-32.png   ブラウザのタブ（SVG 非対応環境むけの控え）
- *   icon-180.png  iOS のホーム画面（apple-touch-icon）★これが無いと iOS はスクショを使う
- *   icon-192.png  Android Chrome（manifest）
- *   icon-512.png  Android Chrome（manifest／スプラッシュ・maskable 兼用）
+ *   apple-touch-icon.png  180px。iOS のホーム画面
+ *                         ★これが無いと iOS はページのスクショを縮小して使う
+ *   icon-192.png          Android Chrome（site.webmanifest）
+ *   icon-512.png          Android Chrome（site.webmanifest／スプラッシュ・丸マスク兼用）
+ *
+ * どれも白い紙の上に描いてから撮るので、原本にアルファがあっても
+ * 白で塗りつぶされ、アルファの無い PNG になる
+ * （iOS は透明部分を黒で塗りつぶすため、アルファを残してはいけない）。
  *
  * アイコンの絵柄を変えるときは assets/icon-src.png だけ差し替えて、これを流し直す。
- * 元絵は 1024×1024 の正方形・背景は不透明にすること
- * （iOS は透明部分を黒で塗りつぶすため）。
+ * 元絵は 1024×1024 の正方形にすること。
+ * Android は丸く切り抜くので、絵柄は中心から半径40%の円に収めること
+ * （tools/check-icons.py で確かめられる）。
  * なお端末はアイコンを強くキャッシュするので、確認するときは
  * ホーム画面から一度削除して追加し直すこと。
  */
@@ -21,7 +26,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const SIZES = [32, 180, 192, 512];
+// 出す大きさと、その名前
+const OUT = [[180, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']];
 const ASSETS = path.join(__dirname, '..', 'assets');
 const SRC = path.join(ASSETS, 'icon-src.png');
 
@@ -41,7 +47,7 @@ const launchOptions = fs.existsSync(BUNDLED) ? { executablePath: BUNDLED } : {};
   const src = 'data:image/png;base64,' + fs.readFileSync(SRC).toString('base64');
   const browser = await chromium.launch(launchOptions);
 
-  for (const size of SIZES) {
+  for (const [size, name] of OUT) {
     const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
     await page.setContent(
       `<style>html,body{margin:0;padding:0;width:${size}px;height:${size}px;overflow:hidden;background:#fff}
@@ -52,10 +58,9 @@ const launchOptions = fs.existsSync(BUNDLED) ? { executablePath: BUNDLED } : {};
       const img = document.querySelector('img');
       return img && img.complete && img.naturalWidth > 0;
     });
-    const out = path.join(ASSETS, `icon-${size}.png`);
-    await page.screenshot({ path: out });
+    await page.screenshot({ path: path.join(ASSETS, name) });
     await page.close();
-    console.log(`書き出し: assets/icon-${size}.png (${size}x${size})`);
+    console.log(`書き出し: assets/${name} (${size}x${size})`);
   }
 
   await browser.close();

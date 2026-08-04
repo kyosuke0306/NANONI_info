@@ -360,13 +360,16 @@ schedule.html           スケジュールのページ（工程・担当・優�
 lot2.html               第2ロットのページ（費用と在庫を入力して計算）
 chat.html               AIに質問するページ（各自のAPIキーで Claude を呼ぶ）
 payload.js              暗号化された本文（★リポジトリに入るのはこれだけ）
-manifest.webmanifest    ホーム画面アイコン・表示名（Android Chrome 用）
+site.webmanifest        ホーム画面アイコン・表示名（Android Chrome 用）
 assets/style.css        スタイル（ライト/ダーク・印刷対応）
 assets/app.js           復号・目次生成・スクロール連動・キーワード絞り込み
 assets/icon-src.png     アイコンの原本（1024×1024。これを差し替えて PNG を作り直す）
-assets/icon-*.png       32/180/192/512。180 は iOS、192・512 は Android が使う
+assets/apple-touch-icon.png  180px。iOS のホーム画面
+assets/icon-192.png     タブと Android
+assets/icon-512.png     Android（スプラッシュ・丸マスク兼用）
 tools/build.py          暗号化 / 復号ツール
 tools/make-icons.js     icon-src.png から各サイズの PNG を生成する
+tools/check-icons.py    書き出したアイコンを確かめる（透明・四隅・丸マスク）
 src/content.html        本文の平文（.gitignore 対象。commit されません）
 ```
 
@@ -376,22 +379,39 @@ src/content.html        本文の平文（.gitignore 対象。commit されま�
 
 ```bash
 npm install playwright-core     # 初回のみ
-node tools/make-icons.js        # icon-src.png → icon-32/180/192/512.png
+node tools/make-icons.js        # icon-src.png → 3ファイル
+pip install Pillow              # 初回のみ
+python3 tools/check-icons.py    # 書き出したものを確かめる
 ```
 
-原本は **1024×1024 の正方形**で、**背景を不透明**にしてください
-（iOS は透明部分を黒で塗りつぶします）。
+原本は **1024×1024 の正方形**にしてください。
 角丸は付けないこと。iOS も Android も端末側で角を丸めます。
+
+**アルファ（透明）は残しません。** iOS は透明部分を黒で塗りつぶすので、
+残っていると**ホーム画面で黒い四角**になります。
+`make-icons.js` は白い紙の上に描いてから撮るので、原本に透明があっても
+白で塗りつぶされ、アルファの無い PNG になります。
+
+**絵柄は中心から半径40%の円に収めてください。** Android は丸く切り抜くので
+（`site.webmanifest` の `purpose: "any maskable"`）、はみ出すと欠けます。
+`check-icons.py` がこの3点をまとめて確かめます。
+
+```
+[OK] icon-src.png           1024x1024 RGB  透明なし=True  絵柄の広がり=37.6%（上限 40%）
+[OK] apple-touch-icon.png   180x180 RGB    透明なし=True  絵柄の広がり=37.8%（上限 40%）
+[OK] icon-192.png           192x192 RGB    透明なし=True  絵柄の広がり=37.9%（上限 40%）
+[OK] icon-512.png           512x512 RGB    透明なし=True  絵柄の広がり=37.6%（上限 40%）
+```
 
 アイコンの割り当ては次のとおりです。
 
 | 対象 | 使われるファイル | 指定場所 |
 |---|---|---|
-| iOS（ホーム画面） | `assets/icon-180.png` | `index.html` の `apple-touch-icon` |
+| iOS（ホーム画面） | `assets/apple-touch-icon.png` | `index.html` の `apple-touch-icon` |
 | iOS（アイコン下の名前） | — | `index.html` の `apple-mobile-web-app-title` |
-| Android Chrome | `assets/icon-192.png` / `icon-512.png` | `manifest.webmanifest` |
-| Android（表示名） | — | `manifest.webmanifest` の `short_name` |
-| ブラウザのタブ | `assets/icon-32.png` / `icon-192.png` | `index.html` の `rel="icon"` |
+| Android Chrome | `assets/icon-192.png` / `icon-512.png` | `site.webmanifest` |
+| Android（表示名） | — | `site.webmanifest` の `short_name` |
+| ブラウザのタブ | `assets/icon-192.png` | `index.html` の `rel="icon"` |
 
 > **iOS は manifest を見ません。** `apple-touch-icon` の PNG がないと、
 > ホーム画面にはページのスクリーンショットが縮小されて置かれます。
@@ -410,7 +430,7 @@ node tools/make-icons.js        # icon-src.png → icon-32/180/192/512.png
 | `<meta name="apple-mobile-web-app-status-bar-style" …>` | 上記のときの時計まわりの色 |
 | `<meta name="mobile-web-app-capable" content="yes">` | Android 側の同じ指定 |
 
-manifest の `display` も `standalone` から **`minimal-ui`** にしてあります。
+`site.webmanifest` の `display` も `standalone` から **`minimal-ui`** にしてあります。
 `standalone` のままだと、meta を外しても Safari が manifest を見てアプリ扱いにするためです。
 
 > 同じ絵柄・同じ白背景で白いまま出ている `kyosuke0306/NANONI_home` に合わせた形です。

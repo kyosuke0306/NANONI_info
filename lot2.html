@@ -7,22 +7,23 @@
 <meta name="referrer" content="no-referrer">
 <title>NANONI / 24CLUB — 第2ロットの在庫と費用</title>
 
-<!-- ブラウザのタブ用。絵柄が画像なので SVG は置かず PNG だけにしてある -->
-<link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
+<!-- アイコンはすべて、白い紙に重ねてアルファを捨てた PNG。
+     透明を残すと iOS がそこを黒く塗りつぶし、黒い四角になってしまう。 -->
+
+<!-- ブラウザのタブ用 -->
 <link rel="icon" href="assets/icon-192.png" sizes="192x192" type="image/png">
 
 <!-- iOS：ホーム画面に追加したときのアイコンと名前。
-     apple-touch-icon（180×180 PNG）が無いと、iOS はページのスクショを縮小して使う。
+     これが無いと iOS はページのスクショを縮小して使う。
 
      「アプリとして開く」指定（apple-mobile-web-app-capable / manifest の
      display:standalone）は付けない。付けると iOS がアプリ扱いにして、
-     端末が暗い外観のときアイコンを勝手に暗く落としてしまう。
-     NANONI_home（同じ白背景のアイコン）は付けていないので白いまま出ている。 -->
-<link rel="apple-touch-icon" href="assets/icon-180.png">
+     端末が暗い外観のときアイコンを勝手に暗く落としてしまう。 -->
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="NANONI">
 
-<!-- Android Chrome：アイコンと表示名は manifest 側 -->
-<link rel="manifest" href="manifest.webmanifest">
+<!-- Android Chrome：アイコンと表示名は site.webmanifest 側 -->
+<link rel="manifest" href="site.webmanifest">
 <meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#16150f" media="(prefers-color-scheme: dark)">
 
