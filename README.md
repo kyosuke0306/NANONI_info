@@ -364,7 +364,7 @@ site.webmanifest        ホーム画面アイコン・表示名（Android Chrome
 assets/style.css        スタイル（ライト/ダーク・印刷対応）
 assets/app.js           復号・目次生成・スクロール連動・キーワード絞り込み
 assets/icon-src.png     アイコンの原本（1024×1024。これを差し替えて PNG を作り直す）
-assets/apple-touch-icon.png  180px。iOS のホーム画面
+assets/apple-touch-icon.png  512px。iOS のホーム画面
 assets/icon-192.png     タブと Android
 assets/icon-512.png     Android（スプラッシュ・丸マスク兼用）
 tools/build.py          暗号化 / 復号ツール
@@ -398,16 +398,21 @@ python3 tools/check-icons.py    # 書き出したものを確かめる
 
 ```
 [OK] icon-src.png           1024x1024 RGB  透明なし=True  絵柄の広がり=37.6%（上限 40%）
-[OK] apple-touch-icon.png   180x180 RGB    透明なし=True  絵柄の広がり=37.8%（上限 40%）
+[OK] apple-touch-icon.png   512x512 RGB    透明なし=True  絵柄の広がり=37.6%（上限 40%）
 [OK] icon-192.png           192x192 RGB    透明なし=True  絵柄の広がり=37.9%（上限 40%）
 [OK] icon-512.png           512x512 RGB    透明なし=True  絵柄の広がり=37.6%（上限 40%）
 ```
+
+> **`apple-touch-icon.png` は 512px にしてあります。**
+> Apple の目安は 180px ですが、実機で**ぼけて描かれた**ため大きくしました
+> （ふちが黒から白に変わる幅が、綺麗に出ているサイトの 1.2画素に対して 5.8画素だった）。
+> 端末が縮小して描く形になるので、拡大によるぼけは起きません。
 
 アイコンの割り当ては次のとおりです。
 
 | 対象 | 使われるファイル | 指定場所 |
 |---|---|---|
-| iOS（ホーム画面） | `assets/apple-touch-icon.png` | `index.html` の `apple-touch-icon` |
+| iOS（ホーム画面） | `assets/apple-touch-icon.png`（512px） | `index.html` の `apple-touch-icon` |
 | iOS（アイコン下の名前） | — | `index.html` の `apple-mobile-web-app-title` |
 | Android Chrome | `assets/icon-192.png` / `icon-512.png` | `site.webmanifest` |
 | Android（表示名） | — | `site.webmanifest` の `short_name` |

@@ -6,8 +6,10 @@
  *   node tools/make-icons.js
  *
  * 生成されるもの
- *   apple-touch-icon.png  180px。iOS のホーム画面
+ *   apple-touch-icon.png  512px。iOS のホーム画面
  *                         ★これが無いと iOS はページのスクショを縮小して使う
+ *                         180px でも足りるはずだが、実機でぼけて描かれたため
+ *                         大きめにしてある（縮小なら必ずくっきりする）
  *   icon-192.png          Android Chrome（site.webmanifest）
  *   icon-512.png          Android Chrome（site.webmanifest／スプラッシュ・丸マスク兼用）
  *
@@ -27,7 +29,7 @@ const fs = require('fs');
 const path = require('path');
 
 // 出す大きさと、その名前
-const OUT = [[180, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']];
+const OUT = [[512, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']];
 const ASSETS = path.join(__dirname, '..', 'assets');
 const SRC = path.join(ASSETS, 'icon-src.png');
 
