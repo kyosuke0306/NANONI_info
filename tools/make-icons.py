@@ -67,7 +67,7 @@ def main():
     b64 = base64.b64encode((ASSETS / "icon-192.png").read_bytes()).decode("ascii")
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="NANONI">\n'
-        '  <rect width="192" height="192" fill="#ffffff"/>\n'
+        f'  <rect width="192" height="192" fill="#{bg[0]:02x}{bg[1]:02x}{bg[2]:02x}"/>\n'
         f'  <image x="0" y="0" width="192" height="192" href="data:image/png;base64,{b64}"/>\n'
         "</svg>\n"
     )
